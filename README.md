@@ -90,13 +90,32 @@ versions rather than a reproducible lockfile. The optimization engine is unchang
 
 ## Phase 2: AI Logistics Assistant
 
-Install the updated requirements using the cloud commands above. Optionally set
-`OPENAI_API_KEY` through secure runtime environment secrets and `OPENAI_MODEL`
-(default `gpt-4o-mini`). Never commit a key or `.env` file. The application reads
-environment variables directly; it does not load `.env` files. No key is required.
-Allow HTTPS access to `api.openai.com` in cloud environment settings for live use.
-Use anonymized shipment IDs: LLM mode sends the request and tool results (shipment
-constraints and simulated plans) to OpenAI. Never include customer personal data.
+Install the updated requirements using the cloud commands above. Configure the
+primary provider through secure environment settings:
+
+- `AI_PROVIDER=deepseek`
+- `DEEPSEEK_API_KEY`: enter a fresh key securely, never in chat or source files.
+- `DEEPSEEK_MODEL=deepseek-flash` (default; override for an account-supported model).
+- Permit outbound HTTPS to `api.deepseek.com`.
+
+The OpenAI-compatible SDK uses `https://api.deepseek.com` and Chat Completions
+function tools (`tools`, assistant `tool_calls`, and tool replies with `tool_call_id`).
+Strict mode is not enabled: every argument is locally schema-validated. Model
+availability is account-dependent; this default is user-requested, not live-verified.
+Optional OpenAI mode uses `AI_PROVIDER=openai`, `OPENAI_API_KEY`, and
+`OPENAI_MODEL` (default `gpt-4o-mini`). With no explicit provider, DeepSeek is the
+default, except legacy installations with only an OpenAI key retain OpenAI mode.
+No secrets are required for deterministic fallback. `.env.example` contains names
+only; the app does not load `.env` files. Never send customer personal data: use
+fictional/anonymized shipments, as requests/tool results go to the selected provider.
+
+Click **Test AI connection** to make exactly one minimal API request using fictional
+samples. Success requires a model-generated `inspect_orders` call with locally
+validated arguments and actual execution of that KargoKawan tool; it is not just
+an HTTP ping. No second API request sends the result back. The test never runs on
+ordinary rerenders. The UI shows configured provider/model, connection result,
+and the actual live/fallback mode of each assistant request. Key presence alone
+does not prove live connectivity.
 
 `agent.py` exposes six schema-validated tools: `inspect_orders`,
 `inspect_shipping_options`, `optimise_shipments`, `explain_plan`,
@@ -113,7 +132,7 @@ shipping-option questions, named fictional-provider availability changes, and
 requests such as `Change KK001 deadline to 3 days`. It is not general natural-language
 understanding; unfamiliar requests show validated orders. Missing keys and API errors
 use this fallback. Invalid model tool calls are visibly rejected. Tests mock the SDK
-and make no paid calls. Live API operation has not been validated without a key.
+and make no paid calls. Live API operation has not been validated: no runtime key was configured and the cloud proxy denied the DeepSeek destination (HTTP 403).
 
 ### Demonstration with Malaysian sample orders
 
@@ -136,3 +155,22 @@ integration is included. The displayed assistant answer is computed structured d
 not free-form LLM prose. The existing optimization engine and its assumptions remain
 unchanged. The main dashboard and assistant have separate plan views until an
 approved disruption is applied; ordinary assistant optimisation is read-only.
+
+
+### Provider reliability pass
+
+On partial API failure, timeout or rejected tools, all partial computed results and
+proposals are discarded. Trace entries are marked discarded/rejected without old
+result payloads, then fallback operates on the unchanged input snapshot. Attempted
+calls still count toward the shared six-call limit; if exhausted, a new request is
+required. Invalid disruption arguments also clear earlier proposals. Approval
+requires an unchanged orders/availability fingerprint. Raw provider errors and
+credentials are never displayed. Provider selection does not enable real shipping.
+
+Validation: 41 tests passed, including mocked DeepSeek/OpenAI SDK configuration,
+tool protocol, timeout redaction, missing keys, partial-failure rollback, budget
+exhaustion, approval/staleness, and click-only connection testing. The deterministic
+engine remains unchanged. Live DeepSeek/model compatibility remains unverified
+until a fresh secret and outbound access are configured. The public documentation
+fetch was also blocked (HTTP 403); standard non-strict Chat Completions tool format
+is used. Audit/proposals remain session-local and fallback uses limited matching.

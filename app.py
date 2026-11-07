@@ -5,6 +5,7 @@ import streamlit as st
 from engine import sample_orders, CITIES
 from dashboard import PROVIDERS, normalize, replan, manifest
 from agent import run_request, approve
+from ai_provider import configuration, test_connection
 
 st.set_page_config(page_title='KargoKawan | Operations', page_icon='📦', layout='wide')
 st.markdown('''<style>
@@ -96,7 +97,15 @@ if s.planner.get('history'):
 
 st.subheader('AI Logistics Assistant')
 st.caption('SIMULATED DATA · Fictional shipping only · Up to six tool calls · Changes require approval')
-st.caption('Optional OpenAI mode sends your request and computed shipment data to OpenAI. Use anonymized orders and never include personal information. Without a key, deterministic command matching remains available.')
+config = configuration()
+st.write(f"Selected AI provider: {config['provider']} · Model: {config['model']}")
+st.caption('Live API configured (connection unverified)' if config['ready'] else 'Deterministic fallback active — no usable provider configuration')
+st.caption('Live mode sends requests and computed data to the selected AI provider. Use fictional/anonymized data only; never send customer personal information.')
+if st.button('Test AI connection'):
+    with st.spinner('Testing one read-only tool call on fictional samples…'):
+        s.ai_connection = test_connection()
+if s.get('ai_connection'):
+    (st.success if s.ai_connection['ok'] else st.warning)(s.ai_connection['message'])
 request = st.text_input('Ask the logistics assistant', placeholder='Optimise these orders and explain why this plan is cheaper.')
 if st.button('Ask assistant'):
     try:
@@ -130,7 +139,7 @@ if s.get('assistant_feedback'):
     st.info(s.assistant_feedback)
 answer = s.get('assistant_result')
 if answer:
-    st.write(answer['label'] + ' · ' + answer['mode'])
+    st.write(answer['label'] + ' · ' + answer['provider'] + ' · ' + answer['mode'])
     if answer['notice']: st.info(answer['notice'])
     for number, action in enumerate(answer['trace'], 1):
         with st.expander(f"{number}. {action['tool']} — {action['status']}", expanded=True):

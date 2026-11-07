@@ -7,6 +7,7 @@ from dataclasses import asdict
 from jsonschema import validate as validate_schema, ValidationError
 from dashboard import normalize, fingerprint, PROVIDERS
 from engine import solve, candidates
+from ai_provider import configuration, create_client, safe_error
 
 EMPTY = {'type': 'object', 'properties': {}, 'additionalProperties': False}
 CHANGE = {'type': 'object', 'properties': {
@@ -52,7 +53,8 @@ class LogisticsAgent:
 
     def call(self, name, arguments):
         if len(self.trace) >= 6: raise ValueError('Six-tool-call limit reached.')
-        event = {'tool':name, 'status':'rejected'}
+        if name == 'simulate_disruption': self.proposal = None
+        event = {'tool':name if name in SCHEMAS else 'unsupported', 'status':'rejected'}
         self.trace.append(event)
         try:
             if name not in SCHEMAS: raise ValueError('Unsupported tool.')
@@ -130,12 +132,14 @@ def run_request(prompt, orders, disabled=(), client=None):
     mode, notice = 'Deterministic fallback', ''
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000:
         raise ValueError('Enter a request between 1 and 4000 characters.')
-    if client is None and os.getenv('OPENAI_API_KEY'):
+    config = configuration()
+    if client is None and config['ready']:
         try:
-            from openai import OpenAI
-            client = OpenAI(timeout=12, max_retries=0)
-        except Exception:
-            notice = 'LLM initialization failed; using deterministic tools.'
+            client = create_client(config)
+        except Exception as exc:
+            notice = safe_error(exc) + ' Using deterministic fallback.'
+    elif client is None:
+        notice = config['error'] or f"Missing {config['key_name']}; using deterministic fallback."
     if client is not None:
         mode = 'LLM tool orchestration'
         messages = [{'role':'system', 'content':
@@ -150,10 +154,12 @@ def run_request(prompt, orders, disabled=(), client=None):
         try:
             while len(agent.trace) < 6:
                 if time.monotonic()-started >= 45: raise TimeoutError()
-                response = client.chat.completions.create(model=os.getenv('OPENAI_MODEL', 'gpt-4o-mini'),
+                response = client.chat.completions.create(model=config['model'],
                     messages=messages, tools=TOOLS, tool_choice='auto', timeout=min(12, 45-(time.monotonic()-started)))
                 message = response.choices[0].message
-                if not message.tool_calls: break
+                if not message.tool_calls:
+                    if not agent.trace: raise ValueError('No tool called')
+                    break
                 messages.append(message.model_dump(exclude_none=True))
                 for call in message.tool_calls:
                     if len(agent.trace) >= 6: break
@@ -161,13 +167,20 @@ def run_request(prompt, orders, disabled=(), client=None):
                     except (ValueError, TypeError): args = None
                     output = agent.call(call.function.name, args)
                     messages.append({'role':'tool', 'tool_call_id':call.id, 'content':json.dumps(output)})
+                    if 'error' in output: raise ValueError('Rejected tool call')
             if len(agent.trace) == 6: notice = 'Six-tool-call limit reached; showing computed results.'
-        except Exception:
-            notice = 'LLM request failed or timed out; deterministic fallback remains available.'
+        except Exception as exc:
+            notice = safe_error(exc) + ' Partial AI results discarded; using deterministic fallback.'
             mode = 'Deterministic fallback'
-        if not agent.trace or mode == 'Deterministic fallback':
+            # Keep attempts in the shared six-call budget, but remove abandoned results.
+            attempts = [dict(tool=e['tool'], status='rejected' if e['status']=='rejected' else 'discarded',
+                             error=e.get('error', 'Partial AI result discarded.')) for e in agent.trace]
+            agent = LogisticsAgent(orders, disabled)
+            agent.trace = attempts
+        if mode == 'Deterministic fallback':
             if len(agent.trace) < 6: fallback(agent, prompt)
+            else: notice += ' Tool budget exhausted; submit a new request for deterministic planning.'
     else: fallback(agent, prompt)
-    return {'mode':mode, 'notice':notice, 'trace':agent.trace, 'proposal':agent.proposal,
+    return {'provider':config['provider'], 'mode':mode, 'notice':notice, 'trace':agent.trace, 'proposal':agent.proposal,
             'plan':summary(agent.plan, agent.orders) if agent.plan else None,
             'label':'SIMULATED DATA — computed tool output only'}
