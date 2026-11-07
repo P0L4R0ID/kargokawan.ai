@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 from engine import sample_orders, CITIES
 from dashboard import PROVIDERS, normalize, replan, manifest
+from agent import run_request, approve
 
 st.set_page_config(page_title='KargoKawan | Operations', page_icon='📦', layout='wide')
 st.markdown('''<style>
@@ -21,7 +22,7 @@ s = st.session_state
 with st.sidebar:
     st.header('Operations desk')
     st.caption('36-hour competition prototype')
-    disabled = st.multiselect('Unavailable fictional providers', PROVIDERS, help='Changes automatically trigger replanning after the initial run.')
+    disabled = st.multiselect('Unavailable fictional providers', PROVIDERS, key='provider_state', help='Changes automatically trigger replanning after the initial run.')
     st.divider()
     upload = st.file_uploader('Import shipment CSV', type=['csv'])
     st.download_button('Download sample CSV', sample_orders().to_csv(index=False), 'sample_orders.csv', 'text/csv')
@@ -91,3 +92,57 @@ if s.planner.get('history'):
             for step in event['steps']: st.write('• ' + step)
             st.write('Unavailable fictional providers:', ', '.join(event['disabled']) or 'None')
             st.code(event['input_csv'], language='csv')
+
+
+st.subheader('AI Logistics Assistant')
+st.caption('SIMULATED DATA · Fictional shipping only · Up to six tool calls · Changes require approval')
+st.caption('Optional OpenAI mode sends your request and computed shipment data to OpenAI. Use anonymized orders and never include personal information. Without a key, deterministic command matching remains available.')
+request = st.text_input('Ask the logistics assistant', placeholder='Optimise these orders and explain why this plan is cheaper.')
+if st.button('Ask assistant'):
+    try:
+        with st.spinner('Running logistics tools…'):
+            s.assistant_result = run_request(request, edited, disabled)
+    except ValueError as exc:
+        s.pop('assistant_result', None)
+        st.error(str(exc))
+
+
+def apply_assistant_change():
+    try:
+        updated, unavailable = approve(s.assistant_result['proposal'], edited, disabled, approved=True)
+        s.orders = updated
+        s.provider_state = unavailable
+        s.revision += 1
+        replan(s.planner, updated, unavailable, force=True)
+        s.planner['history'][-1]['trigger'] = 'User approved AI assistant disruption preview'
+        s.pop('assistant_result', None)
+        s.assistant_feedback = 'Approved change applied and replanned.'
+    except ValueError as exc:
+        s.assistant_feedback = str(exc)
+
+
+def discard_assistant_change():
+    s.pop('assistant_result', None)
+    s.assistant_feedback = 'Proposal discarded. Current orders and providers were not changed.'
+
+
+if s.get('assistant_feedback'):
+    st.info(s.assistant_feedback)
+answer = s.get('assistant_result')
+if answer:
+    st.write(answer['label'] + ' · ' + answer['mode'])
+    if answer['notice']: st.info(answer['notice'])
+    for number, action in enumerate(answer['trace'], 1):
+        with st.expander(f"{number}. {action['tool']} — {action['status']}", expanded=True):
+            st.json(action.get('result', {'error':action.get('error')}))
+    if answer['plan']:
+        st.write('Computed current plan — SIMULATED DATA')
+        st.json(answer['plan'])
+    if answer['proposal']:
+        proposal = answer['proposal']
+        st.warning('Preview only. Current orders and availability remain unchanged until you approve.')
+        left, right = st.columns(2)
+        left.write('Before — SIMULATED DATA'); left.json(proposal['before'])
+        right.write('Proposed — SIMULATED DATA'); right.json(proposal['after'])
+        st.button('Apply proposed change', on_click=apply_assistant_change)
+        st.button('Discard', on_click=discard_assistant_change)
