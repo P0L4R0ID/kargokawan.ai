@@ -1,0 +1,8 @@
+provider,source_url,evidence_type,access_method,access_limitation,collected_at_utc
+EasyParcel Malaysia,https://easyparcel.com/my/shipping-rates/,published starting prices for selected services,web search indexed official page,Direct site fetch blocked by proxy 403; no shipment-specific quote obtained,2026-11-08
+J&T Express Malaysia,https://www.jtexpress.my/index.php/shipping-rates,shipping rate tool,web search indexed official page,Direct site fetch blocked by proxy 403; no rate retrieved,2026-11-08
+Ninja Van Malaysia,https://www.ninjavan.co/en-my/support/shipper-support/pricing-and-coverage/how-to-calculate-and-check-shipping-rates,price estimate instructions,web search indexed official page,Account or calculator interaction needed for exact rate,2026-11-08
+Pos Malaysia,https://www.pos.com.my/,parcel rate calculator,web search indexed official site,Direct site fetch blocked by proxy 403; no rate retrieved,2026-11-08
+Lalamove Malaysia,https://www.lalamove.com/en-my/all-vehicle-pricing-detail,additional-stop fee schedule,web search indexed official page,Full trip fare requires route and app quote; direct site fetch blocked by proxy 403,2026-11-08
+DHL Malaysia,https://www.dhl.com/my-en/home/get-a-quote.html,business quote calculator,web search indexed official page,JavaScript quote tool and shipment details required; direct site fetch blocked by proxy 403,2026-11-08
+TheLorry Malaysia,https://thelorry.com/my/business/faq2/,distance and vehicle pricing method,web search indexed official page,Exact multi-stop price requires route and vehicle quote; direct site fetch blocked by proxy 403,2026-11-08

@@ -1,0 +1,5 @@
+scenario,required_evidence,price_myr,reason,next_step
+A,five parcel quotes and one five-stop dedicated vehicle quote in Klang Valley,NOT_OBTAINED,"Exact postcodes, dimensions, service conditions and authorized quote-tool access are needed",Collect official personalized quotes with matching shipment inputs and save provider evidence
+B,KL to Penang and Johor parcel quotes,NOT_OBTAINED,"Exact postcodes, dimensions, service conditions and authorized quote-tool access are needed",Collect official personalized quotes with matching shipment inputs and save provider evidence
+C,Kota Kinabalu to Sandakan parcel or freight quote,NOT_OBTAINED,"Exact postcodes, dimensions, service conditions and authorized quote-tool access are needed",Collect official personalized quotes with matching shipment inputs and save provider evidence
+D,Peninsular to East Malaysia parcel or freight quote,NOT_OBTAINED,"Exact postcodes, dimensions, service conditions and authorized quote-tool access are needed",Collect official personalized quotes with matching shipment inputs and save provider evidence
