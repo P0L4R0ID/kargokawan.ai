@@ -1,5 +1,7 @@
 # Restricted EasyParcel pilot: security gate and hosting steps
 
+Pilot draft jobs now have an OIDC-verified Render API behind a persistent-disk gate. See [pilot_auth_integration.md](pilot_auth_integration.md) for the current implementation and configuration. EasyParcel OAuth itself remains disabled.
+
 ## Current deployment facts
 
 The public Streamlit frontend is `https://kargokawan.streamlit.app`. The user reports a health-only Render backend at `https://kargokawan-oauth.onrender.com`, with EasyParcel callback registered as `https://kargokawan-oauth.onrender.com/oauth/easyparcel/callback`. EasyParcel Developer Hub app settings have been saved. This development environment could not reach the Render host (network proxy returned 403), so live health and the registered app cannot be independently verified here. **No live EasyParcel account is linked.** The production OAuth start and callback routes remain hard-disabled (403), even when environment variables are set.

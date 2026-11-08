@@ -16,6 +16,9 @@ st.markdown('''<style>
 st.caption('KARGOKAWAN AI  /  MALAYSIA SME OPERATIONS')
 st.title('Deliver smarter. Stay in control.')
 st.write('Plan shipments, compare delivery strategies and respond to operational changes.')
+from pilot_ui import render as render_pilot
+render_pilot()
+st.header('Public fictional demo')
 st.warning('SIMULATION ONLY · All shipping providers are fictional. Rates, costs, ETAs and savings are simulated assumptions, not quotations or guarantees. No bookings or payments.')
 for key, value in {'orders':sample_orders(), 'planner':{}, 'revision':0, 'upload_hash':None}.items():
     if key not in st.session_state: st.session_state[key] = value

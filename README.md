@@ -348,3 +348,7 @@ The frontend is deployed at `https://kargokawan.streamlit.app`. EasyParcel Open 
 ### Restricted operator pilot status
 
 The reported Render health-only backend is `https://kargokawan-oauth.onrender.com`; its registered EasyParcel callback is `/oauth/easyparcel/callback`. Live linking remains disabled. The public UI uses per-session disposable demo jobs, while an isolated server-side pilot store tests signed operator identity and owner-scoped job/quote operations. The pilot store is not connected to the UI. See [docs/secure_pilot_account_linking.md](docs/secure_pilot_account_linking.md) for paid persistent storage, OIDC and account-bridge prerequisites.
+
+### Authenticated pilot drafts
+
+The optional OIDC-backed pilot section sends the signed operator ID token from server-side Streamlit to Render for independent verification. It supports owner-scoped draft jobs and unverified quotation records only when a paid Render disk is mounted and pilot settings are configured. EasyParcel OAuth and live quotation retrieval remain disabled. See [docs/pilot_auth_integration.md](docs/pilot_auth_integration.md) for exact setup and release blockers.

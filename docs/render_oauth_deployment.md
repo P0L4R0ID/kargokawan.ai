@@ -1,5 +1,7 @@
 # Render deployment for EasyParcel OAuth readiness
 
+For the current optional OIDC-verified pilot draft API, see [pilot_auth_integration.md](pilot_auth_integration.md). This document describes the separate EasyParcel OAuth callback, which remains disabled.
+
 **Current state:** KargoKawan's public frontend origin is **https://kargokawan.streamlit.app**. A health-only OAuth backend is reported at **https://kargokawan-oauth.onrender.com** and the EasyParcel Developer Hub app settings are reported saved. No live OAuth authentication has succeeded; Codex could not reach the Render host from this environment to verify its current deployment. The code for the production backend deliberately returns **403** for `/oauth/easyparcel/start` and `/oauth/easyparcel/callback`, even if credentials are configured. Its `/health` route works without secrets. There is no Connect EasyParcel action in Streamlit.
 
 ## Why account linking is disabled
