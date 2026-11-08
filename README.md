@@ -174,3 +174,56 @@ engine remains unchanged. Live DeepSeek/model compatibility remains unverified
 until a fresh secret and outbound access are configured. The public documentation
 fetch was also blocked (HTTP 403); standard non-strict Chat Completions tool format
 is used. Audit/proposals remain session-local and fallback uses limited matching.
+
+## Real quote import (experimental)
+
+The separate imported quote model in `quotes.py` accepts user-obtained carrier
+quotations. Download its CSV header with `quotes.template()`. Each quote needs an
+ID, source reference, retrieval and expiry times with time zones, five-digit
+Malaysian postcodes, route cities and states, weight and dimension limits, a MYR
+total, component charges, transit time, covered shipment IDs and conditions.
+Multiple shipment IDs use semicolons. All prices use decimal arithmetic.
+
+Imported quotations are **user supplied and not independently authenticated by
+KargoKawan**. The optimiser uses only eligible, unexpired quotations matching the
+shipment postcode, city, dimensions and deadline. Group discounts require an
+explicit group quotation. Where complete quote coverage is absent, the result is
+`NOT QUOTED / UNKNOWN`. The baseline uses eligible single-shipment quotations
+from the same import. No booking or payment occurs.
+
+Live carrier quoting remains disabled. `carrier_adapters.py` defines an adapter
+boundary for EasyParcel and Lalamove, but no endpoint or authentication format
+has been verified against official documentation. Configure and verify a carrier
+account and its production or sandbox credentials before implementing a live
+adapter. Sandbox responses must remain labelled sandbox test data.
+
+### Imported quotation demo
+
+1. Select **Imported quotations** below the simulated dashboard. The two price
+   sources are kept separate. Enter each origin and destination as an exact
+   five-digit postcode; leading zeros are required. **Load fictional demo
+   postcodes** fills synthetic sample values for the 15 demo orders only.
+2. Download the quotation CSV template. It contains these required columns:
+   `quote_id,provider,service,currency,source_reference,retrieved_at,valid_until,origin_postcode,destination_postcode,origin_city,destination_city,origin_state,destination_state,physical_weight_kg,volumetric_weight_kg,max_weight_kg,max_length_cm,max_width_cm,max_height_cm,eligible,restrictions,transport_method,total_myr,tax_myr,surcharge_myr,handling_myr,last_mile_myr,transit_days,transit_guaranteed,shipment_ids,conditions`.
+   Use `MYR`, ISO 8601 timestamps with time zones, `true`/`false` booleans,
+   decimal MYR with at most two places, and semicolon-separated shipment IDs
+   for an explicitly quoted group consignment. The provider's quote reference
+   belongs in `source_reference`; the app does not authenticate it.
+3. Upload user-obtained quotes and select **Plan with imported quotations**.
+   Review supporting quote IDs, provider, service, amount, source reference and
+   validity. The baseline uses only eligible individual quotes from the same
+   upload. Missing coverage displays `NOT QUOTED / UNKNOWN`.
+4. Select **Apply imported proposal** to enable the proposed CSV manifest, or
+   **Discard imported proposal**. Changes to orders, uploaded quotes or provider
+   availability invalidate a pending preview or approved manifest. Export does
+   not book transportation or pay carriers.
+
+The imported route model requires exact postcode and city matches. It does not
+verify that a postcode belongs to a city or state, authenticate a user-uploaded
+quote with a carrier, implement special service restrictions beyond the explicit
+eligibility flag and size/weight/deadline limits, or infer group discounts.
+Live EasyParcel and Lalamove adapters remain disabled pending documented API
+configuration and verification. Tests use synthetic fixtures; no paid API calls.
+Validation: **50 tests passed** and Streamlit health endpoint returned HTTP 200.
+Streamlit AppTest cannot operate the file uploader directly; the UI interaction
+test injects an uploaded CSV fixture and the parser is tested separately.
