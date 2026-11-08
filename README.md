@@ -286,3 +286,18 @@ jobs. A real manually imported mixed quote plan can seed a delivery job only
 after quote-plan approval, complete recipient intake and matching order IDs; the
 job then requires its own explicit approval. Source labels on manual quotes are
 not independent provider authentication. The handoff creates no booking.
+
+## Guided conversational intake
+
+Use **Tell KargoKawan what you need delivered** to enter one line per explicit
+order, for example: `Order SME001: from Kuala Lumpur 50000 to Kuching 93000, 2 kg,
+30x20x10 cm, within 7 days, recipient Customer A; budget RM50`. Select
+**Extract explicit order details**, review the editable draft and answer its
+focused missing-field questions. The same editor accepts the operations sample
+CSV upload, so incomplete rows can be corrected there. Select **Confirm corrected
+draft and create job** only after validation. The deterministic parser recognizes
+labeled facts; it does not claim general language understanding or fill missing
+customer details. A user-stated budget is displayed for review, not automatically
+used to invent a carrier quote. Collect complete EasyParcel and Lalamove quote
+evidence next. A complete intake is ready for planning, not booking. Live carrier
+rates, tracking and booking remain unavailable.
