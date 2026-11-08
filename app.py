@@ -372,7 +372,18 @@ st.caption('Use the AI Logistics Assistant above for optional request interpreta
 if st.button('Load synthetic nationwide intake sample'):
     s.ops_sample=sample_orders().assign(recipient=lambda frame:frame.order_id.map(lambda oid:'SYNTHETIC RECIPIENT '+oid),origin_postcode='',destination_postcode='')
     st.warning('SYNTHETIC INTAKE SAMPLE — NOT CUSTOMER DATA. Exact postcodes must be supplied; city names do not determine them.')
-ops_orders=st.data_editor(s.get('ops_sample',pd.DataFrame(columns=['order_id','recipient','origin_postcode','destination_postcode','weight_kg','length_cm','width_cm','height_cm','deadline_days'])),key='ops_orders_editor',num_rows='dynamic')
+from sample_intake import load_sample_intake
+ops_upload=st.file_uploader('Import delivery operations CSV',type='csv',key='ops_csv_upload')
+if ops_upload is not None:
+    digest=hashlib.sha256(ops_upload.getvalue()).hexdigest()
+    if digest!=s.get('ops_upload_hash'):
+        try:
+            s.ops_sample=load_sample_intake(ops_upload.getvalue())
+            s.ops_upload_hash=digest
+            s.ops_editor_revision=s.get('ops_editor_revision',0)+1
+        except (ValueError,UnicodeError) as exc: st.error(f'Operations import rejected; existing orders retained: {exc}')
+else: s.ops_upload_hash=None
+ops_orders=st.data_editor(s.get('ops_sample',pd.DataFrame(columns=['order_id','recipient','origin_postcode','destination_postcode','weight_kg','length_cm','width_cm','height_cm','deadline_days'])),key=f'ops_orders_editor_{s.get("ops_editor_revision",0)}',num_rows='dynamic')
 missing_ops=intake_checklist(ops_orders.to_dict('records'))
 if missing_ops:
     st.write('User action checklist')
