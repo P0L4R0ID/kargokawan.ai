@@ -1,0 +1,1 @@
+carrier_id,service,version,volumetric_divisor_cm3_per_kg,weight_increment_kg,minimum_charge_myr,tax_rate_pct,fee_myr,surcharge_myr,max_length_cm,max_width_cm,max_height_cm,effective_from,valid_until,provenance,source_reference

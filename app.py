@@ -231,3 +231,31 @@ if quote_mode == 'Imported quotations':
     if s.get('imported_approved'):
         st.success('Imported quotation proposal approved for manifest export. No shipment booked.')
         st.download_button('Export approved imported manifest', imported_manifest(s.imported_approved).to_csv(index=False), 'approved_imported_manifest.csv', 'text/csv')
+
+st.subheader('Carrier rate-card management')
+st.caption('Calculated estimates use only complete uploaded tariff tables. Synthetic fixtures are demonstrations, not carrier quotes. No booking occurs.')
+from pricing import FIELDS as PRICING_FIELDS, template as pricing_template, load_csv as load_pricing_csv, calculate as calculate_tariff
+uploaded_tables={}
+for table_kind in PRICING_FIELDS:
+    st.download_button(f'Download {table_kind}.csv template', pricing_template(table_kind), f'{table_kind}.csv', 'text/csv')
+    tariff_file=st.file_uploader(f'Upload {table_kind}.csv', type='csv', key=f'tariff_{table_kind}')
+    if tariff_file is not None:
+        try:
+            uploaded_tables[table_kind]=load_pricing_csv(table_kind,tariff_file.getvalue())
+            st.write(f'{table_kind}: {len(uploaded_tables[table_kind])} validated rows')
+            st.dataframe(pd.DataFrame(uploaded_tables[table_kind]))
+        except ValueError as exc: st.error(f'{table_kind}: {exc}')
+if st.button('Calculate carrier estimates'):
+    if set(uploaded_tables)!=set(PRICING_FIELDS):
+        st.warning('RATE UNAVAILABLE: upload all four complete tariff tables.')
+    elif 'imported_orders' not in s:
+        st.warning('RATE UNAVAILABLE: enter postcode-aware orders in Imported quotations mode.')
+    else:
+        rows=[]
+        for order in s.imported_orders.to_dict('records'):
+            outcome=calculate_tariff(order,uploaded_tables)
+            if isinstance(outcome,list):
+                for item in outcome: rows.append({'order_id':order['order_id'],**item})
+            else: rows.append({'order_id':order['order_id'],**outcome})
+        st.dataframe(pd.DataFrame(rows))
+        st.caption('CALCULATED ESTIMATES ONLY · Not authenticated live quotes or approved shipping proposals.')

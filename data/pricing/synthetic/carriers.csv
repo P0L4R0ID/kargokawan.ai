@@ -1,0 +1,2 @@
+carrier_id,name,service,available,provenance,source_reference
+DEMO,Synthetic Test Carrier,Parcel,true,synthetic,TEST_FIXTURE

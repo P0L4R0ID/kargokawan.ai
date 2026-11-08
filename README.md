@@ -227,3 +227,20 @@ configuration and verification. Tests use synthetic fixtures; no paid API calls.
 Validation: **50 tests passed** and Streamlit health endpoint returned HTTP 200.
 Streamlit AppTest cannot operate the file uploader directly; the UI interaction
 test injects an uploaded CSV fixture and the parser is tested separately.
+
+## Carrier tariff calculator
+
+`pricing.py` loads four separate CSV tables: `carriers`, `rate_cards`,
+`pricing_rules`, and `postcode_zones`. Header-only templates are under
+`data/pricing/templates/`; entirely synthetic example rows are under
+`data/pricing/synthetic/`. The dashboard accepts each table and displays
+calculated estimates with tariff version, source, chargeable weight, minimum,
+fees, surcharges, tax and total. The calculator uses the uploaded carrier's
+volumetric divisor and weight increment, then requires one matching current
+weight band and both current postcode-zone mappings. Missing or ambiguous data
+returns `RATE UNAVAILABLE`. This does not create a carrier quote or approval.
+
+`provenance=official_rate_card` requires a source URL; `synthetic` labels a
+fixture. Only MYR tariffs are supported. Effective dates and rule versions must
+match. Do not use advertised starting prices as full rate cards. The quote
+importer and simulated optimizer remain separate. No carrier APIs are called.
