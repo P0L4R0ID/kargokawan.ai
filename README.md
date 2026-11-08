@@ -301,3 +301,18 @@ customer details. A user-stated budget is displayed for review, not automaticall
 used to invent a carrier quote. Collect complete EasyParcel and Lalamove quote
 evidence next. A complete intake is ready for planning, not booking. Live carrier
 rates, tracking and booking remain unavailable.
+
+## Guided quote collection
+
+After creating a complete delivery job, use **Collect real shipping quotations**
+to download a minimal quote-request sheet without recipient names. It lists the
+package facts needed for individual EasyParcel courier requests and possible
+same-region Lalamove multi-stop request candidates. A candidate is never a
+claim that a vehicle is available. Cross-sea groupings are not proposed as one
+road route. Record an actual provider quote in the form, review missing fields,
+correct the draft, and save it. Both providers remain `NOT_CONNECTED`; the form
+stores user evidence as `USER_IMPORTED_UNVERIFIED`. Provider-specific CSV uploads
+remain available. The progress table shows order-level courier coverage,
+complete vehicle subsets and unresolved quote requests. A quote-backed plan must
+be previewed and approved, then sent to a persistent delivery job for a second
+approval. No booking, dispatch, payment or live tracking occurs.
