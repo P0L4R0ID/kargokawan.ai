@@ -301,7 +301,7 @@ if 'imported_orders' in s and focused_quotes:
                 s.mixed_approved=None
             if s.get('mixed_preview'):
                 from focused_quotes import fingerprint as mixed_fingerprint
-                if s.mixed_preview['fingerprint']!=mixed_fingerprint(mixed_orders,mixed_quotes,[])+repr(sorted(mixed_unavailable)):
+                if s.mixed_preview['fingerprint']!=mixed_fingerprint(mixed_orders,mixed_quotes,[])+repr(sorted(mixed_unavailable))+repr(False):
                     s.mixed_preview=None; s.mixed_approved=None
                     st.warning('Inputs changed; generate a fresh mixed-method preview.')
                 else:
@@ -314,7 +314,7 @@ if 'imported_orders' in s and focused_quotes:
                         except ValueError as exc: st.error(str(exc))
                     if st.button('Discard mixed-method plan'): s.mixed_preview=None
             if s.get('mixed_approved'):
-                if s.mixed_approved_fingerprint!=__import__('focused_quotes').fingerprint(mixed_orders,mixed_quotes,[])+repr(sorted(mixed_unavailable)):
+                if s.mixed_approved_fingerprint!=__import__('focused_quotes').fingerprint(mixed_orders,mixed_quotes,[])+repr(sorted(mixed_unavailable))+repr(False):
                     s.mixed_approved=None
                     st.warning('Approved plan cleared because inputs changed.')
                 else: st.success('Mixed-method proposal approved. No transport booked.')
@@ -323,3 +323,42 @@ if 'imported_orders' in s and focused_quotes:
     except ValueError as exc:
         s.mixed_preview=None; s.mixed_approved=None
         st.error(str(exc))
+
+st.subheader('Competition demo · mixed methods')
+from demo_scenario import LABEL as DEMO_LABEL, load_demo
+from mixed_method import optimize as demo_optimize, preview as demo_preview, approve as demo_approve
+st.error(DEMO_LABEL)
+if st.button('Load Demo Scenario'):
+    s.demo_orders,s.demo_quotes=load_demo()
+    s.demo_unavailable=[]
+    s.demo_preview=None
+    s.demo_approved=None
+if s.get('demo_orders') is not None:
+    st.write('Four fictional shipments from one KL pickup to distinct Malaysian postcodes.')
+    st.dataframe(s.demo_orders)
+    unavailable=st.checkbox('Simulate disruption: vehicle provider unavailable',key='demo_disruption')
+    demo_disabled=['Synthetic Lalamove example'] if unavailable else []
+    if demo_disabled!=s.get('demo_unavailable'):
+        s.demo_unavailable=demo_disabled
+        s.demo_preview=None
+        s.demo_approved=None
+    plan=demo_optimize(s.demo_orders,s.demo_quotes,demo_disabled,demo=True)
+    left,right=st.columns(2)
+    left.metric('All-courier synthetic baseline',f"RM {plan['baseline_myr']:.2f}" if plan['baseline_myr'] is not None else 'NOT AVAILABLE')
+    right.metric('Mixed synthetic plan',f"RM {plan['total_myr']:.2f}" if plan['total_myr'] is not None else 'NOT READY')
+    st.write('Solver status:',plan['status'],plan['reason'])
+    st.dataframe(pd.DataFrame(plan.get('decisions',[])))
+    st.caption('Selected quote IDs, covered shipments, explicit stops, source and costs are fictional. No booking or payment.')
+    if st.button('Preview demo plan'):
+        s.demo_preview=demo_preview(s.demo_orders,s.demo_quotes,demo_disabled,demo=True)
+        s.demo_approved=None
+    if s.get('demo_preview'):
+        st.info('PROPOSAL ONLY — review before approval. No shipment has been booked.')
+        if st.button('Approve demo proposal'):
+            try:
+                s.demo_approved=demo_approve(s.demo_preview,s.demo_orders,s.demo_quotes,demo_disabled,demo=True)
+                s.demo_preview=None
+            except ValueError as exc: st.error(str(exc))
+        if st.button('Discard demo proposal'): s.demo_preview=None
+    if s.get('demo_approved'):
+        st.success('Synthetic plan approved for demonstration. No carrier booking or payment.')

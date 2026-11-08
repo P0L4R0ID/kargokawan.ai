@@ -21,6 +21,8 @@ def import_provider(provider,data):
     for raw in reader:
         if raw.get('provider')!=provider: raise ValueError('Quote provider does not match upload.')
         row=normalize(raw)
+        if row['source_class']=='LIVE_AUTHENTICATED':
+            row['source_class']='USER_IMPORTED_UNVERIFIED'
         if provider=='EasyParcel Malaysia' and row['transport_method']!='parcel_courier': raise ValueError('EasyParcel import is for parcel courier quotes.')
         if provider=='Lalamove Malaysia' and row['transport_method']!='multi_stop_vehicle': raise ValueError('Lalamove import needs an explicit vehicle route.')
         rows.append(row)
