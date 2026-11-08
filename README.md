@@ -340,3 +340,7 @@ remain available. No booking or live provider API call is made.
 ### EasyParcel Open API OAuth readiness
 
 A separate, server-side OAuth callback prototype and deployment guide are in [docs/easyparcel_oauth_deployment.md](docs/easyparcel_oauth_deployment.md). It is not connected to the quotation UI and has not completed a live EasyParcel handshake. The existing Individual API key adapter and manual quotation workflow remain available.
+
+### Public Streamlit deployment and OAuth
+
+The frontend is deployed at `https://kargokawan.streamlit.app`. EasyParcel Open API OAuth account linking remains disabled because this public app lacks authenticated, owner-isolated delivery jobs. See [docs/render_oauth_deployment.md](docs/render_oauth_deployment.md) for the separate Render backend setup and security blockers. Do not enter real customer data into the current public multi-user job workflow.

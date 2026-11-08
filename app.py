@@ -495,10 +495,11 @@ for label,state in [('Needs information','NEEDS_INFORMATION'),('Awaiting approva
 
 st.header('Collect real shipping quotations')
 st.caption('EasyParcel rate lookup is optional; manual evidence remains available. Lalamove live quotations are not enabled.')
-from carrier_adapters import EasyParcelAdapter, LalamoveAdapter
+from carrier_adapters import EasyParcelAdapter, EasyParcelOpenApiAdapter, LalamoveAdapter
 _easy_adapter=EasyParcelAdapter()
 _lama_adapter=LalamoveAdapter()
-st.write('EasyParcel connection:',_easy_adapter.connection_status(),'· Lalamove connection:',_lama_adapter.connection_status())
+st.write('EasyParcel Individual API key:',_easy_adapter.connection_status(),'· Lalamove connection:',_lama_adapter.connection_status())
+st.caption('EasyParcel Open API OAuth: '+EasyParcelOpenApiAdapter().connection_status()+' · Account linking is disabled until users and delivery jobs have private, authenticated access.')
 from quote_guidance import request_checklist, request_details, vehicle_candidates, make_draft, collection_progress
 from mixed_method import preview as guided_preview, approve as guided_approve
 from focused_quotes import fingerprint as guided_fingerprint

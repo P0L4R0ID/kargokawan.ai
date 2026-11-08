@@ -4,4 +4,4 @@ COPY requirements-oauth.txt .
 RUN pip install --no-cache-dir -r requirements-oauth.txt
 COPY oauth_callback.py .
 ENV PORT=8080
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT} --workers 1 oauth_callback:application"]
+CMD ["sh", "-c", "umask 077 && exec gunicorn --bind 0.0.0.0:${PORT} --workers 1 oauth_callback:application"]

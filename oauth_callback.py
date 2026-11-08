@@ -18,18 +18,24 @@ from cryptography.fernet import Fernet
 AUTHORIZE_URL = 'https://api.easyparcel.com/oauth/login'
 TOKEN_URL = 'https://api.easyparcel.com/oauth/token'
 COOKIE = 'kk_easyparcel_oauth_session'
+FRONTEND_ORIGIN = 'https://kargokawan.streamlit.app'
 
 
 def configuration(env=None):
     env = env if env is not None else os.environ
-    names = ('EASYPARCEL_OAUTH_CLIENT_ID', 'EASYPARCEL_OAUTH_CLIENT_SECRET',
+    names = ('EASYPARCEL_OAUTH_PLATFORM_URL', 'EASYPARCEL_OAUTH_CLIENT_ID', 'EASYPARCEL_OAUTH_CLIENT_SECRET',
              'EASYPARCEL_OAUTH_REDIRECT_URI', 'EASYPARCEL_OAUTH_DB', 'EASYPARCEL_OAUTH_FERNET_KEY')
     missing = [name for name in names if not env.get(name)]
     if missing:
         raise ValueError('Missing OAuth server configuration: ' + ', '.join(missing))
     redirect = env['EASYPARCEL_OAUTH_REDIRECT_URI']
     parsed = parse.urlsplit(redirect)
-    if parsed.scheme != 'https' or not parsed.netloc or parsed.path != '/oauth/easyparcel/callback' or parsed.query or parsed.fragment:
+    if env['EASYPARCEL_OAUTH_PLATFORM_URL'].rstrip('/') != FRONTEND_ORIGIN:
+        raise ValueError('Platform URL does not match the verified frontend origin.')
+    if (parsed.scheme != 'https' or not parsed.hostname or parsed.port is not None
+            or parsed.username or parsed.password or parsed.hostname in ('localhost', '127.0.0.1')
+            or parsed.hostname == parse.urlsplit(FRONTEND_ORIGIN).hostname
+            or parsed.path != '/oauth/easyparcel/callback' or parsed.query or parsed.fragment):
         raise ValueError('Redirect URI must be the exact public HTTPS callback URL.')
     Fernet(env['EASYPARCEL_OAUTH_FERNET_KEY'].encode())
     return {name: env[name] for name in names}
@@ -82,16 +88,29 @@ def refresh_token(config, refresh, transport=None):
     return result
 
 
-def create_app(env=None, token_transport=None, clock=None):
-    config = configuration(env)
+def create_app(env=None, token_transport=None, clock=None, enable_test_flow=False):
+    """Build the service. OAuth routes are test-only until user identity exists.
+
+    Production's ``application`` never enables the flow. Injecting a mock token
+    transport is required for tests, so no test can accidentally call EasyParcel.
+    """
+    if enable_test_flow and (env is None or token_transport is None):
+        raise ValueError('The test flow requires explicit configuration and a mock transport.')
+    config = configuration(env) if enable_test_flow else None
     clock = clock or time.time
-    crypt = Fernet(config['EASYPARCEL_OAUTH_FERNET_KEY'].encode())
-    path = config['EASYPARCEL_OAUTH_DB']
+    crypt = Fernet(config['EASYPARCEL_OAUTH_FERNET_KEY'].encode()) if config else None
+    path = config['EASYPARCEL_OAUTH_DB'] if config else None
 
     def app(environ, start_response):
         route = environ.get('PATH_INFO', '')
         if route == '/health':
             return _response(start_response, '200 OK', 'ok')
+        if route in ('/oauth/easyparcel/start', '/oauth/easyparcel/callback') and not enable_test_flow:
+            return _response(start_response, '403 Forbidden', 'EasyParcel account linking is not available.')
+        if route in ('/oauth/easyparcel/start', '/oauth/easyparcel/callback'):
+            expected_host = parse.urlsplit(config['EASYPARCEL_OAUTH_REDIRECT_URI']).netloc
+            if environ.get('HTTP_HOST') != expected_host:
+                return _response(start_response, '400 Bad Request', 'Callback origin is invalid.')
         if environ.get('REQUEST_METHOD') != 'GET':
             return _response(start_response, '405 Method Not Allowed', 'Method not allowed.')
         if route == '/oauth/easyparcel/start':
@@ -130,7 +149,7 @@ def create_app(env=None, token_transport=None, clock=None):
                 db.execute('INSERT OR REPLACE INTO tokens VALUES (?, ?, ?)', (_hash(session), encrypted, int(clock())))
         except (ValueError, error.HTTPError, error.URLError, TimeoutError, OSError):
             return _response(start_response, '502 Bad Gateway', 'Provider token exchange failed.')
-        return _response(start_response, '200 OK', 'EasyParcel account linked on this server. Return to KargoKawan.')
+        return _response(start_response, '200 OK', 'Provider authorization completed in the isolated test flow.')
 
     return app
 
@@ -143,5 +162,5 @@ def get_stored_token(db_path, fernet_key, session):
 
 
 def application(environ, start_response):
-    """Gunicorn entry point; config is checked on the first request."""
+    """Gunicorn entry point; account linking remains disabled in production."""
     return create_app()(environ, start_response)

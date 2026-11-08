@@ -103,6 +103,20 @@ class EasyParcelAdapter(CarrierAdapter):
         return _result(provider,'CONNECTED','Authenticated rate check succeeded; payable total and validity require review.',observed)
 
 
+class EasyParcelOpenApiAdapter(CarrierAdapter):
+    """Future OAuth Open API boundary, separate from the Individual API key flow.
+
+    The public Streamlit app cannot retrieve server-side OAuth tokens until it has
+    authenticated users and account-scoped job storage.
+    """
+    def connection_status(self):
+        return 'NOT_CONNECTED'
+
+    def fetch_rates(self, shipment):
+        return _result('EasyParcel Open API','NOT_CONNECTED',
+            'OAuth account linking is disabled until authenticated users and private job access are implemented.')
+
+
 class LalamoveAdapter(CarrierAdapter):
     def __init__(self, secrets=None):
         self.secrets=secrets
