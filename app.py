@@ -494,7 +494,11 @@ for label,state in [('Needs information','NEEDS_INFORMATION'),('Awaiting approva
     st.write(f'{label}: {_counts[state]}')
 
 st.header('Collect real shipping quotations')
-st.caption('Manual evidence only · EasyParcel parcels and Lalamove route vehicles · both APIs NOT_CONNECTED')
+st.caption('EasyParcel rate lookup is optional; manual evidence remains available. Lalamove live quotations are not enabled.')
+from carrier_adapters import EasyParcelAdapter, LalamoveAdapter
+_easy_adapter=EasyParcelAdapter()
+_lama_adapter=LalamoveAdapter()
+st.write('EasyParcel connection:',_easy_adapter.connection_status(),'· Lalamove connection:',_lama_adapter.connection_status())
 from quote_guidance import request_checklist, request_details, vehicle_candidates, make_draft, collection_progress
 from mixed_method import preview as guided_preview, approve as guided_approve
 from focused_quotes import fingerprint as guided_fingerprint
@@ -542,6 +546,23 @@ else:
             selected_facts=order_facts(selected_rows,selected_ids)
             st.dataframe(pd.DataFrame([row for row in selected_rows if str(row['order_id']) in selected_ids])[['order_id','origin_postcode','destination_postcode','weight_kg','length_cm','width_cm','height_cm','deadline_days']])
         except ValueError as exc: st.error(str(exc))
+    if entry_provider=='EasyParcel Malaysia' and selected_facts:
+        st.caption('Authenticated rate check only. Returned display prices are INCOMPLETE until full payable cost, taxes, surcharges and expiry are confirmed.')
+        api_origin_state=st.text_input('Origin Malaysian state for provider lookup',key='api_origin_state')
+        api_destination_state=st.text_input('Destination Malaysian state for provider lookup',key='api_destination_state')
+        if st.button('Fetch available quotations'):
+            row=next(row for row in selected_rows if str(row['order_id'])==selected_ids[0])
+            request_facts={'order_id':str(row['order_id']),'origin_postcode':str(row['origin_postcode']),
+                'destination_postcode':str(row['destination_postcode']),'origin_state':api_origin_state,
+                'destination_state':api_destination_state,'weight_kg':row['weight_kg'],
+                'length_cm':row['length_cm'],'width_cm':row['width_cm'],'height_cm':row['height_cm']}
+            s.provider_rate_result=_easy_adapter.fetch_rates(request_facts)
+            s.provider_rate_order=(selected_job['job_id'],selected_ids[0])
+        if s.get('provider_rate_result') and s.get('provider_rate_order')==(selected_job['job_id'],selected_ids[0]):
+            st.write('Provider lookup:',s.provider_rate_result['status'],s.provider_rate_result['reason'])
+            if s.provider_rate_result['quotes']:
+                st.dataframe(pd.DataFrame(s.provider_rate_result['quotes']))
+                st.warning('INCOMPLETE display rates are research observations, not eligible plan quotations. Review the payable amount and validity through the manual evidence form.')
     if selected_facts:
         with st.form('manual_quote_entry'):
             st.subheader('Enter quotation details')

@@ -9,6 +9,29 @@ from dashboard import normalize, fingerprint, PROVIDERS
 from engine import solve, candidates
 from ai_provider import configuration, create_client, safe_error
 
+
+class ProviderQuoteTools:
+    """Bounded, read-only quotation tools for an explicitly authorised lookup."""
+    def __init__(self, adapter=None):
+        from carrier_adapters import EasyParcelAdapter
+        self.adapter=adapter or EasyParcelAdapter()
+        self.calls=0
+
+    def call(self, name, order=None):
+        if self.calls>=6: raise ValueError('Six-tool-call limit reached.')
+        self.calls+=1
+        if name=='connection_status':
+            return {'provider':'EasyParcel Malaysia','status':self.adapter.connection_status()}
+        if name=='needed_quote_facts':
+            required=('order_id','origin_postcode','destination_postcode','origin_state',
+                      'destination_state','weight_kg','length_cm','width_cm','height_cm')
+            order=order or {}
+            return {'missing':[field for field in required if order.get(field) is None or str(order.get(field)).strip()=='']}
+        if name=='fetch_easyparcel_rates':
+            if not isinstance(order,dict): raise ValueError('A selected order is required.')
+            return self.adapter.fetch_rates(order)
+        raise ValueError('Unsupported quotation tool.')
+
 EMPTY = {'type': 'object', 'properties': {}, 'additionalProperties': False}
 CHANGE = {'type': 'object', 'properties': {
     'provider': {'type': 'string', 'enum': PROVIDERS},
