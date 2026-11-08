@@ -227,3 +227,34 @@ configuration and verification. Tests use synthetic fixtures; no paid API calls.
 Validation: **50 tests passed** and Streamlit health endpoint returned HTTP 200.
 Streamlit AppTest cannot operate the file uploader directly; the UI interaction
 test injects an uploaded CSV fixture and the parser is tested separately.
+
+## Hybrid research quote review
+
+`hybrid_quotes.py` accepts a separate CSV of incomplete observations. Download
+`data/hybrid/templates/research_quotes.csv` or use the dashboard template button.
+Empty cells stay unknown. Supported source classes are `PUBLIC_REFERENCE`,
+`USER_IMPORTED_UNVERIFIED`, `LIVE_AUTHENTICATED` and `SYNTHETIC`. Review results
+are `INCOMPLETE`, `NEEDS_REVIEW`, `ELIGIBLE`, `EXPIRED` or `INELIGIBLE`.
+The review table shows source evidence, displayed amount, missing fields and
+exclusion reason. It never sends observations to the existing optimizer.
+An `ELIGIBLE` review means the supplied data passed the listed checks against
+supplied orders; it does not authenticate a carrier, and a complete quotation
+still needs to pass the existing 31-field imported-quote path and human approval
+before planning. Public starting rates are always `INCOMPLETE`.
+
+For a dedicated multi-stop vehicle, use `transport_method=multi_stop_vehicle`,
+semicolon-separated `shipment_ids`, and JSON `dropoff_locations` such as
+`[{"shipment_id":"A","postcode":"10000"}]`. Capacity, each stop and deadline
+must match the supplied orders. Missing taxes, surcharge status, final total,
+expiry or route evidence prevent eligibility. The adapter boundary returns
+`MISSING_CREDENTIALS` and makes no API call.
+
+The official public references in `data/hybrid/official_public_references.csv`
+are incomplete research examples. They are never executable prices. The copied
+carrier report explains why no complete current tariff was available.
+A genuine courier-versus-vehicle comparison requires five full courier quotes
+and one full vehicle quote for the same pickup, five exact delivery stops,
+weight and dimensions, service window, total MYR including charge treatment,
+retrieval and expiry times, provider evidence and restrictions. The existing
+imported optimizer does not model one group with five distinct destination
+postcodes, so a verified model extension would also be required.

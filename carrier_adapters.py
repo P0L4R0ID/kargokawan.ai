@@ -16,3 +16,10 @@ class EasyParcelAdapter(CarrierAdapter):
 class LalamoveAdapter(CarrierAdapter):
     def fetch_rates(self, shipment):
         raise RuntimeError('Lalamove live quotes are not configured.')
+
+class MissingCredentialAdapter(CarrierAdapter):
+    """Future authenticated quoting boundary; does not contact any provider."""
+    def __init__(self, provider): self.provider=provider
+    def fetch_rates(self, shipment):
+        return {'status':'MISSING_CREDENTIALS','provider':self.provider,'quotes':[],
+                'message':'An authorized provider account and documented API credentials are required.'}

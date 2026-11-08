@@ -231,3 +231,19 @@ if quote_mode == 'Imported quotations':
     if s.get('imported_approved'):
         st.success('Imported quotation proposal approved for manifest export. No shipment booked.')
         st.download_button('Export approved imported manifest', imported_manifest(s.imported_approved).to_csv(index=False), 'approved_imported_manifest.csv', 'text/csv')
+
+st.subheader('Research price review')
+st.caption('Incomplete observations remain outside shipment optimization. Only full route-specific quotations can be considered for a plan.')
+from hybrid_quotes import parse_csv as parse_research_csv, review as review_research, template as research_template
+st.download_button('Download research quote CSV template', research_template(), 'research_quotes.csv', 'text/csv')
+research_upload=st.file_uploader('Upload research observations CSV',type='csv',key='research_quote_upload')
+if research_upload is not None:
+    try:
+        research_quotes=parse_research_csv(research_upload.getvalue())
+        review_orders=s.get('imported_orders')
+        order_records=review_orders.to_dict('records') if review_orders is not None else []
+        st.dataframe(pd.DataFrame([{'Provider':q['provider'],'Service':q['service'],'Source class':q['source_class'],
+            'Displayed MYR':str(q['displayed_cost_myr']) if q['displayed_cost_myr'] is not None else 'UNKNOWN',
+            'Source':q['source_reference'],'Review status':(r:=review_research(q,order_records))['status'],
+            'Missing':', '.join(r['missing']),'Reason':r['reason']} for q in research_quotes]))
+    except ValueError as exc: st.error(str(exc))

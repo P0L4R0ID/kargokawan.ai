@@ -1,0 +1,1 @@
+quote_id,source_class,provider,service,transport_method,origin_postcode,destination_postcode,pickup_location,dropoff_locations,shipment_ids,physical_weight_kg,length_cm,width_cm,height_cm,capacity_kg,displayed_cost_myr,full_cost,tax_status,surcharge_status,source_reference,collected_at,valid_until,transit_days,restrictions
