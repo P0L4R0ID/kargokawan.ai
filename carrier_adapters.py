@@ -16,3 +16,13 @@ class EasyParcelAdapter(CarrierAdapter):
 class LalamoveAdapter(CarrierAdapter):
     def fetch_rates(self, shipment):
         raise RuntimeError('Lalamove live quotes are not configured.')
+
+class FocusedProviderAdapter(CarrierAdapter):
+    """No live endpoint is assumed; integration requires provider documentation."""
+    def __init__(self,provider):
+        if provider not in ('EasyParcel Malaysia','Lalamove Malaysia','Pos Malaysia'):
+            raise ValueError('Unsupported provider.')
+        self.provider=provider
+    def fetch_rates(self,shipment):
+        return {'status':'NOT_CONNECTED','provider':self.provider,'quotes':[],
+                'reason':'Authorized API credentials and verified provider request format are unavailable.'}

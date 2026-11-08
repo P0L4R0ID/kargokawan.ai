@@ -227,3 +227,24 @@ configuration and verification. Tests use synthetic fixtures; no paid API calls.
 Validation: **50 tests passed** and Streamlit health endpoint returned HTTP 200.
 Streamlit AppTest cannot operate the file uploader directly; the UI interaction
 test injects an uploaded CSV fixture and the parser is tested separately.
+
+## Focused provider comparison
+
+The separate EasyParcel and Lalamove CSV templates in
+`data/focused/templates/` use the research quote schema. EasyParcel rows require
+`transport_method=parcel_courier`; Lalamove rows require
+`transport_method=multi_stop_vehicle` and ordered JSON `dropoff_locations` with
+`shipment_id`, five-digit `postcode`, and `sequence` starting at 1. A complete
+comparison requires one eligible courier quote per order and a single full vehicle
+fare covering exactly the same orders. Capacity, pickup postcode, each destination
+postcode, deadline, final MYR cost, included taxes/surcharges and expiry are
+checked. Public starting prices, synthetic fixtures and incomplete prices are
+shown in the review table but excluded from real comparisons. Unspecified
+restrictions require review. Apply approves a comparison for review only; it
+never books or pays for transport. Edited inputs clear the approval.
+
+All three adapter interfaces (EasyParcel, Lalamove and Pos Malaysia) report
+`NOT_CONNECTED`: no authorized credentials or verified endpoint configuration
+are present, and no live call is made. This path does not replace the existing
+single-destination imported quote optimizer. It evaluates the explicit
+courier-versus-vehicle batch comparison separately from deterministic planning.

@@ -231,3 +231,50 @@ if quote_mode == 'Imported quotations':
     if s.get('imported_approved'):
         st.success('Imported quotation proposal approved for manifest export. No shipment booked.')
         st.download_button('Export approved imported manifest', imported_manifest(s.imported_approved).to_csv(index=False), 'approved_imported_manifest.csv', 'text/csv')
+
+st.subheader('Focused courier versus vehicle readiness')
+st.caption('USER-SUPPLIED quotes only · EasyParcel parcel couriers and Lalamove dedicated multi-stop vehicles · no booking')
+from focused_quotes import template as focused_template, import_provider, evaluate as evaluate_focused, preview as preview_focused, approve as approve_focused, fingerprint as focused_fingerprint
+from carrier_adapters import FocusedProviderAdapter
+focused_quotes={}
+for provider in ('EasyParcel Malaysia','Lalamove Malaysia'):
+    st.write(f"{provider} API: {FocusedProviderAdapter(provider).fetch_rates({})['status']}")
+    st.download_button(f'Download {provider} CSV template',focused_template(provider),provider.lower().replace(' ','_')+'_quotes.csv','text/csv')
+    upload=st.file_uploader(f'Upload {provider} quotes',type='csv',key='focused_'+provider)
+    if upload is not None:
+        try: focused_quotes[provider]=import_provider(provider,upload.getvalue())
+        except ValueError as exc: st.error(str(exc))
+if 'imported_orders' in s and focused_quotes:
+    courier=focused_quotes.get('EasyParcel Malaysia',[])
+    vehicle=focused_quotes.get('Lalamove Malaysia',[])
+    data=s.imported_orders
+    comparison=evaluate_focused(data,courier,vehicle)
+    if s.get('focused_approved') and s.get('focused_approved_fingerprint')!=focused_fingerprint(data,courier,vehicle):
+        s.focused_approved=None
+        st.warning('Approved comparison cleared because inputs changed.')
+    st.dataframe(pd.DataFrame(comparison['reviews']))
+    st.write('Readiness:',comparison['status'])
+    if comparison['status']=='COMPARABLE':
+        st.metric('Couriers · complete MYR',str(comparison['courier_total_myr']))
+        st.metric('Dedicated vehicle · complete MYR',str(comparison['vehicle_total_myr']))
+        if st.button('Preview focused comparison'):
+            s.focused_preview=preview_focused(data,courier,vehicle)
+            s.focused_approved=None
+        if s.get('focused_preview'):
+            if s.focused_preview['fingerprint']!=focused_fingerprint(data,courier,vehicle):
+                s.focused_preview=None; s.focused_approved=None
+                st.warning('Inputs changed; preview again.')
+            else:
+                st.info('Preview only · approve before using this comparison.')
+                if st.button('Apply focused comparison'):
+                    try:
+                        s.focused_approved=approve_focused(s.focused_preview,data,courier,vehicle)
+                        s.focused_approved_fingerprint=focused_fingerprint(data,courier,vehicle)
+                        s.focused_preview=None
+                    except ValueError as exc: st.error(str(exc))
+                if st.button('Discard focused comparison'): s.focused_preview=None
+        if s.get('focused_approved'):
+            st.success('Comparison approved for review only. No shipment booked.')
+    else:
+        s.focused_preview=None; s.focused_approved=None
+        st.info('NOT READY: each order needs one complete courier quote and one full vehicle quote covering the same batch and explicit stops.')
