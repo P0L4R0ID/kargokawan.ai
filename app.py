@@ -278,3 +278,48 @@ if 'imported_orders' in s and focused_quotes:
     else:
         s.focused_preview=None; s.focused_approved=None
         st.info('NOT READY: each order needs one complete courier quote and one full vehicle quote covering the same batch and explicit stops.')
+
+st.subheader('Mixed-method quote optimization')
+st.caption('Deterministic exact cover from complete USER_IMPORTED_UNVERIFIED or LIVE_AUTHENTICATED quotes only. No booking.')
+from mixed_method import optimize as optimize_mixed, preview as preview_mixed, approve as approve_mixed
+if 'imported_orders' in s and focused_quotes:
+    mixed_orders=s.imported_orders
+    mixed_quotes=focused_quotes.get('EasyParcel Malaysia',[])+focused_quotes.get('Lalamove Malaysia',[])
+    mixed_unavailable=st.multiselect('Unavailable mixed-method providers',['EasyParcel Malaysia','Lalamove Malaysia'],key='mixed_unavailable')
+    try:
+        mixed=optimize_mixed(mixed_orders,mixed_quotes,mixed_unavailable)
+        st.write('Plan readiness:',mixed['status'])
+        st.write(mixed['reason'])
+        st.dataframe(pd.DataFrame(mixed['reviewed']))
+        if mixed['status']=='READY':
+            st.metric('Mixed quoted total MYR',str(mixed['total_myr']))
+            st.metric('Eligible standalone baseline MYR',str(mixed['baseline_myr']) if mixed['baseline_myr'] is not None else 'NOT AVAILABLE')
+            st.dataframe(pd.DataFrame(mixed['decisions']))
+            st.warning('Manual quotations remain USER_IMPORTED_UNVERIFIED; differences are not authenticated savings.')
+            if st.button('Preview mixed-method plan'):
+                s.mixed_preview=preview_mixed(mixed_orders,mixed_quotes,mixed_unavailable)
+                s.mixed_approved=None
+            if s.get('mixed_preview'):
+                from focused_quotes import fingerprint as mixed_fingerprint
+                if s.mixed_preview['fingerprint']!=mixed_fingerprint(mixed_orders,mixed_quotes,[])+repr(sorted(mixed_unavailable)):
+                    s.mixed_preview=None; s.mixed_approved=None
+                    st.warning('Inputs changed; generate a fresh mixed-method preview.')
+                else:
+                    st.info('Preview only. Approve to apply the proposed decision.')
+                    if st.button('Approve mixed-method plan'):
+                        try:
+                            s.mixed_approved=approve_mixed(s.mixed_preview,mixed_orders,mixed_quotes,mixed_unavailable)
+                            s.mixed_approved_fingerprint=s.mixed_preview['fingerprint']
+                            s.mixed_preview=None
+                        except ValueError as exc: st.error(str(exc))
+                    if st.button('Discard mixed-method plan'): s.mixed_preview=None
+            if s.get('mixed_approved'):
+                if s.mixed_approved_fingerprint!=__import__('focused_quotes').fingerprint(mixed_orders,mixed_quotes,[])+repr(sorted(mixed_unavailable)):
+                    s.mixed_approved=None
+                    st.warning('Approved plan cleared because inputs changed.')
+                else: st.success('Mixed-method proposal approved. No transport booked.')
+        else:
+            s.mixed_preview=None; s.mixed_approved=None
+    except ValueError as exc:
+        s.mixed_preview=None; s.mixed_approved=None
+        st.error(str(exc))

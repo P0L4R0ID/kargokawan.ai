@@ -248,3 +248,19 @@ All three adapter interfaces (EasyParcel, Lalamove and Pos Malaysia) report
 are present, and no live call is made. This path does not replace the existing
 single-destination imported quote optimizer. It evaluates the explicit
 courier-versus-vehicle batch comparison separately from deterministic planning.
+
+## Mixed-method quote optimization
+
+The mixed-method view uses a bounded deterministic exact-cover solver over the
+uploaded EasyParcel courier and Lalamove multi-stop quotes. At most 20 orders
+and 500 quotes are accepted. Every selected quote covers an explicit subset;
+every order must be covered once. Vehicle quotes retain their own complete
+ordered stop list, capacity, dimensions, deadline, validity and full MYR fare.
+No subset price is derived from a larger route. Ineligible, expired, public
+reference and synthetic records are excluded. The standalone baseline uses only
+the cheapest eligible courier quote for each order; it displays `NOT AVAILABLE`
+when incomplete. Costs remain labelled USER_IMPORTED_UNVERIFIED unless provider
+authentication is independently established. The plan requires preview and
+explicit approval; changed orders, quotes or provider availability invalidate
+approval. No shipment is booked. The simulated and prior imported-quote planners
+remain separate.
