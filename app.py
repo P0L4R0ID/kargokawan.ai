@@ -382,6 +382,21 @@ if st.button('Create delivery job'):
     else:
         s.ops_job_id=ops_store.create(ops_orders)
         st.info('Created job '+s.ops_job_id)
+if s.get('mixed_approved') and 'mixed_quotes' in locals():
+    if st.button('Create delivery job from approved quote plan'):
+        try:
+            if missing_ops: raise ValueError('Complete the recipient and postcode checklist first.')
+            if set(ops_orders.order_id.astype(str)) != set(mixed_orders.order_id.astype(str)):
+                raise ValueError('Job orders must match the approved quote plan exactly.')
+            from focused_quotes import fingerprint as _handoff_fingerprint
+            expected=_handoff_fingerprint(mixed_orders,mixed_quotes,[])+repr(sorted(mixed_unavailable))+repr(False)
+            if s.get('mixed_approved_fingerprint')!=expected:
+                raise ValueError('Approved plan is stale; preview and approve again.')
+            s.ops_job_id=ops_store.create(ops_orders)
+            ops_store.propose(s.ops_job_id,ops_orders,mixed_quotes,mixed_unavailable)
+            st.info('Delivery job created for review. Approve this job separately before preparation.')
+            st.rerun()
+        except ValueError as exc: st.error(str(exc))
 if s.get('ops_job_id'):
     job=ops_store.get(s.ops_job_id)
     st.write('Job ID:',job['job_id'],'· State:',job['state'])

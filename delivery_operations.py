@@ -70,7 +70,7 @@ class JobStore:
         missing=checklist(rows)
         if missing: raise ValueError('Missing order information: '+', '.join(missing[:5]))
         result=plan_preview(orders,quotes,unavailable)
-        snapshot=fingerprint(orders,quotes,[])+repr(sorted(unavailable))
+        snapshot=fingerprint(orders,quotes,[])+repr(sorted(unavailable))+repr(False)
         with self._db() as db:
             db.execute('UPDATE jobs SET state=?,orders_json=?,quotes_json=?,unavailable_json=?,proposal_json=?,updated_at=? WHERE job_id=?',('READY_FOR_REVIEW',json.dumps(rows,default=str),json.dumps(quotes,default=str),json.dumps(list(unavailable)),json.dumps({'fingerprint':snapshot,'summary':{'total_myr':str(result['result']['total_myr']),'quote_ids':[x['quote_id'] for x in result['result']['selected']],'decisions':[{'quote_id':x['quote_id'],'provider':x['provider'],'method':x['transport_method'],'shipment_ids':list(x['shipment_ids']),'source_reference':x['source_reference']} for x in result['result']['selected']]}},default=str),datetime.now(timezone.utc).isoformat(),job_id))
             self._event(db,job_id,'agent','PLAN_PROPOSED','No booking')
@@ -78,7 +78,7 @@ class JobStore:
     def approve(self,job_id,orders,quotes,unavailable=()):
         job=self.get(job_id)
         if job['state']!='READY_FOR_REVIEW' or not job['proposal']: raise ValueError('No reviewable proposal.')
-        if job['proposal']['fingerprint']!=fingerprint(orders,quotes,[])+repr(sorted(unavailable)): raise ValueError('Inputs changed; generate a fresh proposal.')
+        if job['proposal']['fingerprint']!=fingerprint(orders,quotes,[])+repr(sorted(unavailable))+repr(False): raise ValueError('Inputs changed; generate a fresh proposal.')
         result=plan_approve({'fingerprint':job['proposal']['fingerprint']},orders,quotes,unavailable)
         self.transition(job_id,'APPROVED','user','Explicit approval of '+', '.join(job['proposal']['summary']['quote_ids']))
         return result

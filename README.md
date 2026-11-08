@@ -276,3 +276,13 @@ silently replanned. The operations screen also lists missing intake actions and
 lifecycle status counts. See `docs/operations_demo_script.md` for the 2–3 minute
 walkthrough. The free-text goal field does not create orders or invent details.
 No live booking, payment or tracking connector is implemented.
+
+## Integrated operations and competition demo
+
+`feature/integrated-operations` preserves the synthetic competition demo and
+persistent SQLite delivery jobs. See `docs/integrated_demo_script.md` for the
+single 2–3 minute walkthrough. Synthetic demo quotes remain isolated from real
+jobs. A real manually imported mixed quote plan can seed a delivery job only
+after quote-plan approval, complete recipient intake and matching order IDs; the
+job then requires its own explicit approval. Source labels on manual quotes are
+not independent provider authentication. The handoff creates no booking.
