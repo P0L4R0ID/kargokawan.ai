@@ -264,3 +264,15 @@ authentication is independently established. The plan requires preview and
 explicit approval; changed orders, quotes or provider availability invalidate
 approval. No shipment is booked. The simulated and prior imported-quote planners
 remain separate.
+
+## Delivery operations jobs
+
+`delivery_operations.py` stores job state and audit events in local SQLite under
+`.data/delivery_jobs.sqlite` (ignored by Git). It validates intake, proposes
+plans from the mixed-method quote solver, requires explicit approval, exports
+an order-level handoff manifest, and records externally confirmed booking,
+transit and delivery only with user-supplied evidence. Booked jobs cannot be
+silently replanned. The operations screen also lists missing intake actions and
+lifecycle status counts. See `docs/operations_demo_script.md` for the 2–3 minute
+walkthrough. The free-text goal field does not create orders or invent details.
+No live booking, payment or tracking connector is implemented.

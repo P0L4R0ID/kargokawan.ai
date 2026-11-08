@@ -323,3 +323,82 @@ if 'imported_orders' in s and focused_quotes:
     except ValueError as exc:
         s.mixed_preview=None; s.mixed_approved=None
         st.error(str(exc))
+
+st.header('What do you need delivered?')
+st.caption('Operations jobs persist locally. Planning is a proposal; provider booking and tracking are recorded only after user evidence.')
+from delivery_operations import JobStore, checklist as intake_checklist
+from pathlib import Path
+ops_store=JobStore(Path('.data/delivery_jobs.sqlite'))
+ops_request=st.text_area('Describe your logistics goal',placeholder='Deliver these orders within their deadlines and budget. Three are urgent.')
+st.caption('Use the AI Logistics Assistant above for optional request interpretation. Enter actual orders and quotes below; descriptions alone never create customer data.')
+if st.button('Load synthetic nationwide intake sample'):
+    s.ops_sample=sample_orders().assign(recipient=lambda frame:frame.order_id.map(lambda oid:'SYNTHETIC RECIPIENT '+oid),origin_postcode='',destination_postcode='')
+    st.warning('SYNTHETIC INTAKE SAMPLE — NOT CUSTOMER DATA. Exact postcodes must be supplied; city names do not determine them.')
+ops_orders=st.data_editor(s.get('ops_sample',pd.DataFrame(columns=['order_id','recipient','origin_postcode','destination_postcode','weight_kg','length_cm','width_cm','height_cm','deadline_days'])),key='ops_orders_editor',num_rows='dynamic')
+missing_ops=intake_checklist(ops_orders.to_dict('records'))
+if missing_ops:
+    st.write('User action checklist')
+    for item in missing_ops[:20]: st.write('• '+item)
+if st.button('Create delivery job'):
+    if ops_orders.empty: st.error('Enter at least one order first.')
+    else:
+        s.ops_job_id=ops_store.create(ops_orders)
+        st.info('Created job '+s.ops_job_id)
+if s.get('ops_job_id'):
+    job=ops_store.get(s.ops_job_id)
+    st.write('Job ID:',job['job_id'],'· State:',job['state'])
+    st.write('Orders:',len(job['orders']),'· Missing information:',len(intake_checklist(job['orders'])))
+    st.dataframe(pd.DataFrame(job['events']))
+    st.write('Agent actions: validate intake, review quote coverage, prepare a proposal. User actions: supply missing fields, approve, book with provider, record evidence.')
+    if st.button('Update job intake'):
+        ops_store.set_inputs(s.ops_job_id,ops_orders,[])
+        st.rerun()
+    if 'mixed_quotes' in locals() and mixed_quotes and not missing_ops:
+        if st.button('Propose job plan from imported quotes'):
+            try:
+                ops_store.propose(s.ops_job_id,ops_orders,mixed_quotes,mixed_unavailable)
+                st.rerun()
+            except ValueError as exc: st.error(str(exc))
+        if job['state']=='READY_FOR_REVIEW' and st.button('Approve delivery job plan'):
+            try:
+                ops_store.approve(s.ops_job_id,ops_orders,mixed_quotes,mixed_unavailable)
+                st.rerun()
+            except ValueError as exc: st.error(str(exc))
+    if job['state']=='APPROVED' and st.button('Mark shipment preparation complete'):
+        ops_store.transition(s.ops_job_id,'PREPARED','user','Manifest and package details reviewed')
+        st.rerun()
+    if job['state']=='PREPARED' and st.button('Handoff for manual booking'):
+        ops_store.transition(s.ops_job_id,'AWAITING_BOOKING','user','Provider booking details prepared')
+        st.rerun()
+    if job['state']=='AWAITING_BOOKING':
+        booking_reference=st.text_input('Provider booking reference')
+        tracking_id=st.text_input('Tracking ID')
+        booking_evidence=st.text_input('Booking confirmation evidence reference')
+        if st.button('Record externally confirmed booking'):
+            try:
+                ops_store.record_booking(s.ops_job_id,booking_reference,tracking_id,booking_evidence)
+                st.rerun()
+            except ValueError as exc: st.error(str(exc))
+    if job['state']=='BOOKED':
+        transit_evidence=st.text_input('Carrier transit evidence')
+        if st.button('Record in transit'):
+            try:
+                ops_store.transition(s.ops_job_id,'IN_TRANSIT','user',transit_evidence)
+                st.rerun()
+            except ValueError as exc: st.error(str(exc))
+    if job['state']=='IN_TRANSIT':
+        delivery_evidence=st.text_input('Carrier delivery evidence')
+        if st.button('Record delivered'):
+            try:
+                ops_store.transition(s.ops_job_id,'DELIVERED','user',delivery_evidence)
+                st.rerun()
+            except ValueError as exc: st.error(str(exc))
+    if job['state'] in ('APPROVED','PREPARED','AWAITING_BOOKING','BOOKED','IN_TRANSIT','DELIVERED'):
+        st.download_button('Download approved job manifest',ops_store.manifest(s.ops_job_id).to_csv(index=False),'delivery_job_manifest.csv','text/csv')
+
+st.subheader('Delivery operations status')
+from collections import Counter
+with ops_store._db() as _ops_db:
+    _counts=Counter(row[0] for row in _ops_db.execute('SELECT state FROM jobs'))
+for label,state in [('Needs information','NEEDS_INFORMATION'),('Awaiting approval','READY_FOR_REVIEW'),('Awaiting booking','AWAITING_BOOKING'),('Booked','BOOKED'),('In transit','IN_TRANSIT'),('Delivered','DELIVERED'),('Needs attention','NEEDS_ATTENTION')]:
+    st.write(f'{label}: {_counts[state]}')
