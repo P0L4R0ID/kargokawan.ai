@@ -3,7 +3,9 @@ import hashlib
 import pandas as pd
 import streamlit as st
 from engine import sample_orders, CITIES
-from dashboard import PROVIDERS, normalize, replan, manifest
+from dashboard import PROVIDERS, COLUMNS, normalize, replan, manifest
+from agent import run_request, approve
+from ai_provider import configuration, test_connection
 
 st.set_page_config(page_title='KargoKawan | Operations', page_icon='📦', layout='wide')
 st.markdown('''<style>
@@ -21,7 +23,7 @@ s = st.session_state
 with st.sidebar:
     st.header('Operations desk')
     st.caption('36-hour competition prototype')
-    disabled = st.multiselect('Unavailable fictional providers', PROVIDERS, help='Changes automatically trigger replanning after the initial run.')
+    disabled = st.multiselect('Unavailable fictional providers', PROVIDERS, key='provider_state', help='Changes automatically trigger replanning after the initial run.')
     st.divider()
     upload = st.file_uploader('Import shipment CSV', type=['csv'])
     st.download_button('Download sample CSV', sample_orders().to_csv(index=False), 'sample_orders.csv', 'text/csv')
@@ -91,3 +93,376 @@ if s.planner.get('history'):
             for step in event['steps']: st.write('• ' + step)
             st.write('Unavailable fictional providers:', ', '.join(event['disabled']) or 'None')
             st.code(event['input_csv'], language='csv')
+
+
+st.subheader('AI Logistics Assistant')
+st.caption('SIMULATED DATA · Fictional shipping only · Up to six tool calls · Changes require approval')
+config = configuration()
+st.write(f"Selected AI provider: {config['provider']} · Model: {config['model']}")
+st.caption('Live API configured (connection unverified)' if config['ready'] else 'Deterministic fallback active — no usable provider configuration')
+st.caption('Live mode sends requests and computed data to the selected AI provider. Use fictional/anonymized data only; never send customer personal information.')
+if st.button('Test AI connection'):
+    with st.spinner('Testing one read-only tool call on fictional samples…'):
+        s.ai_connection = test_connection()
+if s.get('ai_connection'):
+    (st.success if s.ai_connection['ok'] else st.warning)(s.ai_connection['message'])
+request = st.text_input('Ask the logistics assistant', placeholder='Optimise these orders and explain why this plan is cheaper.')
+if st.button('Ask assistant'):
+    try:
+        with st.spinner('Running logistics tools…'):
+            s.assistant_result = run_request(request, edited, disabled)
+    except ValueError as exc:
+        s.pop('assistant_result', None)
+        st.error(str(exc))
+
+
+def apply_assistant_change():
+    try:
+        updated, unavailable = approve(s.assistant_result['proposal'], edited, disabled, approved=True)
+        s.orders = updated
+        s.provider_state = unavailable
+        s.revision += 1
+        replan(s.planner, updated, unavailable, force=True)
+        s.planner['history'][-1]['trigger'] = 'User approved AI assistant disruption preview'
+        s.pop('assistant_result', None)
+        s.assistant_feedback = 'Approved change applied and replanned.'
+    except ValueError as exc:
+        s.assistant_feedback = str(exc)
+
+
+def discard_assistant_change():
+    s.pop('assistant_result', None)
+    s.assistant_feedback = 'Proposal discarded. Current orders and providers were not changed.'
+
+
+if s.get('assistant_feedback'):
+    st.info(s.assistant_feedback)
+answer = s.get('assistant_result')
+if answer:
+    st.write(answer['label'] + ' · ' + answer['provider'] + ' · ' + answer['mode'])
+    if answer['notice']: st.info(answer['notice'])
+    for number, action in enumerate(answer['trace'], 1):
+        with st.expander(f"{number}. {action['tool']} — {action['status']}", expanded=True):
+            st.json(action.get('result', {'error':action.get('error')}))
+    if answer['plan']:
+        st.write('Computed current plan — SIMULATED DATA')
+        st.json(answer['plan'])
+    if answer['proposal']:
+        proposal = answer['proposal']
+        st.warning('Preview only. Current orders and availability remain unchanged until you approve.')
+        left, right = st.columns(2)
+        left.write('Before — SIMULATED DATA'); left.json(proposal['before'])
+        right.write('Proposed — SIMULATED DATA'); right.json(proposal['after'])
+        st.button('Apply proposed change', on_click=apply_assistant_change)
+        st.button('Discard', on_click=discard_assistant_change)
+
+
+from quotes import template, import_quotes, validate_postcodes, preview_imported, approve_imported, imported_manifest
+st.subheader('Quotation data source')
+quote_mode = st.radio('Select price source', ['Simulated demo', 'Imported quotations'], horizontal=True)
+if quote_mode == 'Imported quotations':
+    st.warning('USER-SUPPLIED quotations are not independently authenticated. No booking or payment occurs.')
+    st.download_button('Download quotation CSV template', template(), 'quotation_template.csv', 'text/csv')
+    st.caption('Enter five-digit postcodes for each order. Sample values below are fictional demo input.')
+    demo_postcodes = {'Kuala Lumpur':'50000','George Town':'10000','Johor Bahru':'80000','Ipoh':'30000','Melaka':'75000','Kuantan':'25000','Kota Kinabalu':'88000','Sandakan':'90000','Tawau':'91000','Kuching':'93000','Miri':'98000','Sibu':'96000'}
+    real_orders = edited.copy()
+    if 'imported_orders' not in s or not s.imported_orders[COLUMNS].equals(edited[COLUMNS]):
+        s.imported_orders = edited.copy()
+        s.imported_orders['origin_postcode'] = ''
+        s.imported_orders['destination_postcode'] = ''
+        s.imported_preview = None
+        s.imported_approved = None
+    real_orders = s.imported_orders.copy()
+    if st.button('Load fictional demo postcodes'):
+        s.imported_orders['origin_postcode'] = s.imported_orders.origin.map(demo_postcodes)
+        s.imported_orders['destination_postcode'] = s.imported_orders.destination.map(demo_postcodes)
+        s.real_postcode_revision = s.get('real_postcode_revision', 0) + 1
+        real_orders = s.imported_orders.copy()
+    real_orders = st.data_editor(real_orders, key=f'real_orders_editor_{s.get("real_postcode_revision",0)}', hide_index=True, use_container_width=True)
+    if not real_orders.equals(s.imported_orders):
+        s.imported_orders = real_orders.copy()
+        s.imported_preview = None
+        s.imported_approved = None
+    quote_upload = st.file_uploader('Upload user-obtained quotation CSV', type=['csv'], key='quote_upload')
+    unavailable = st.multiselect('Unavailable quoted providers', [], key='quoted_unavailable')
+    if tuple(unavailable) != s.get('imported_unavailable', ()):
+        s.imported_unavailable = tuple(unavailable)
+        s.imported_preview = None
+        s.imported_approved = None
+    imported = None
+    upload_bytes = quote_upload.getvalue() if quote_upload is not None else None
+    if upload_bytes != s.get('imported_upload_bytes'):
+        s.imported_upload_bytes = upload_bytes
+        s.imported_preview = None
+        s.imported_approved = None
+    if quote_upload is not None:
+        try:
+            imported = import_quotes(upload_bytes)
+            st.dataframe(pd.DataFrame([{'Quote ID':q['quote_id'],'Provider':q['provider'],'Service':q['service'],'Price MYR':str(q['total_myr']),'Reference':q['source_reference'],'Retrieved':q['retrieved_at'].isoformat(),'Expires':q['valid_until'].isoformat(),'Eligible':q['eligible']} for q in imported]))
+        except ValueError as exc:
+            st.error(str(exc))
+    if st.button('Plan with imported quotations'):
+        try:
+            if imported is None: raise ValueError('Upload valid quotations first.')
+            s.imported_preview = preview_imported(real_orders, imported, unavailable)
+            s.imported_approved = None
+        except ValueError as exc:
+            s.imported_preview = None
+            st.error(str(exc))
+    if s.get('imported_preview') and imported is not None and s.imported_preview['fingerprint'] != __import__('quotes').quote_fingerprint(validate_postcodes(real_orders), imported, unavailable):
+        s.imported_preview = None
+        s.imported_approved = None
+        st.warning('Inputs changed. Generate a fresh preview.')
+    if s.get('imported_preview'):
+        proposed = s.imported_preview['plan']
+        st.info('Preview only. Review quote IDs and source references before approval.')
+        st.metric('Quoted proposal MYR', str(proposed['total_myr']))
+        st.metric('Same-source standalone baseline MYR', str(proposed['baseline_myr']) if proposed['baseline_myr'] is not None else 'UNKNOWN / NOT QUOTED')
+        st.dataframe(imported_manifest(proposed))
+        if st.button('Apply imported proposal'):
+            try:
+                if imported is None: raise ValueError('Quotations changed; generate a fresh preview.')
+                s.imported_approved = approve_imported(s.imported_preview, real_orders, imported, unavailable)
+                s.imported_preview = None
+            except ValueError as exc: st.error(str(exc))
+        if st.button('Discard imported proposal'):
+            s.imported_preview = None
+            st.info('Proposal discarded.')
+    if s.get('imported_approved'):
+        st.success('Imported quotation proposal approved for manifest export. No shipment booked.')
+        st.download_button('Export approved imported manifest', imported_manifest(s.imported_approved).to_csv(index=False), 'approved_imported_manifest.csv', 'text/csv')
+
+st.subheader('Focused courier versus vehicle readiness')
+st.caption('USER-SUPPLIED quotes only · EasyParcel parcel couriers and Lalamove dedicated multi-stop vehicles · no booking')
+from focused_quotes import template as focused_template, import_provider, evaluate as evaluate_focused, preview as preview_focused, approve as approve_focused, fingerprint as focused_fingerprint
+from carrier_adapters import FocusedProviderAdapter
+focused_quotes={}
+for provider in ('EasyParcel Malaysia','Lalamove Malaysia'):
+    st.write(f"{provider} API: {FocusedProviderAdapter(provider).fetch_rates({})['status']}")
+    st.download_button(f'Download {provider} CSV template',focused_template(provider),provider.lower().replace(' ','_')+'_quotes.csv','text/csv')
+    upload=st.file_uploader(f'Upload {provider} quotes',type='csv',key='focused_'+provider)
+    if upload is not None:
+        try: focused_quotes[provider]=import_provider(provider,upload.getvalue())
+        except ValueError as exc: st.error(str(exc))
+if 'imported_orders' in s and focused_quotes:
+    courier=focused_quotes.get('EasyParcel Malaysia',[])
+    vehicle=focused_quotes.get('Lalamove Malaysia',[])
+    data=s.imported_orders
+    comparison=evaluate_focused(data,courier,vehicle)
+    if s.get('focused_approved') and s.get('focused_approved_fingerprint')!=focused_fingerprint(data,courier,vehicle):
+        s.focused_approved=None
+        st.warning('Approved comparison cleared because inputs changed.')
+    st.dataframe(pd.DataFrame(comparison['reviews']))
+    st.write('Readiness:',comparison['status'])
+    if comparison['status']=='COMPARABLE':
+        st.metric('Couriers · complete MYR',str(comparison['courier_total_myr']))
+        st.metric('Dedicated vehicle · complete MYR',str(comparison['vehicle_total_myr']))
+        if st.button('Preview focused comparison'):
+            s.focused_preview=preview_focused(data,courier,vehicle)
+            s.focused_approved=None
+        if s.get('focused_preview'):
+            if s.focused_preview['fingerprint']!=focused_fingerprint(data,courier,vehicle):
+                s.focused_preview=None; s.focused_approved=None
+                st.warning('Inputs changed; preview again.')
+            else:
+                st.info('Preview only · approve before using this comparison.')
+                if st.button('Apply focused comparison'):
+                    try:
+                        s.focused_approved=approve_focused(s.focused_preview,data,courier,vehicle)
+                        s.focused_approved_fingerprint=focused_fingerprint(data,courier,vehicle)
+                        s.focused_preview=None
+                    except ValueError as exc: st.error(str(exc))
+                if st.button('Discard focused comparison'): s.focused_preview=None
+        if s.get('focused_approved'):
+            st.success('Comparison approved for review only. No shipment booked.')
+    else:
+        s.focused_preview=None; s.focused_approved=None
+        st.info('NOT READY: each order needs one complete courier quote and one full vehicle quote covering the same batch and explicit stops.')
+
+st.subheader('Mixed-method quote optimization')
+st.caption('Deterministic exact cover from complete USER_IMPORTED_UNVERIFIED or LIVE_AUTHENTICATED quotes only. No booking.')
+from mixed_method import optimize as optimize_mixed, preview as preview_mixed, approve as approve_mixed
+if 'imported_orders' in s and focused_quotes:
+    mixed_orders=s.imported_orders
+    mixed_quotes=focused_quotes.get('EasyParcel Malaysia',[])+focused_quotes.get('Lalamove Malaysia',[])
+    mixed_unavailable=st.multiselect('Unavailable mixed-method providers',['EasyParcel Malaysia','Lalamove Malaysia'],key='mixed_unavailable')
+    try:
+        mixed=optimize_mixed(mixed_orders,mixed_quotes,mixed_unavailable)
+        st.write('Plan readiness:',mixed['status'])
+        st.write(mixed['reason'])
+        st.dataframe(pd.DataFrame(mixed['reviewed']))
+        if mixed['status']=='READY':
+            st.metric('Mixed quoted total MYR',str(mixed['total_myr']))
+            st.metric('Eligible standalone baseline MYR',str(mixed['baseline_myr']) if mixed['baseline_myr'] is not None else 'NOT AVAILABLE')
+            st.dataframe(pd.DataFrame(mixed['decisions']))
+            st.warning('Manual quotations remain USER_IMPORTED_UNVERIFIED; differences are not authenticated savings.')
+            if st.button('Preview mixed-method plan'):
+                s.mixed_preview=preview_mixed(mixed_orders,mixed_quotes,mixed_unavailable)
+                s.mixed_approved=None
+            if s.get('mixed_preview'):
+                from focused_quotes import fingerprint as mixed_fingerprint
+                if s.mixed_preview['fingerprint']!=mixed_fingerprint(mixed_orders,mixed_quotes,[])+repr(sorted(mixed_unavailable))+repr(False):
+                    s.mixed_preview=None; s.mixed_approved=None
+                    st.warning('Inputs changed; generate a fresh mixed-method preview.')
+                else:
+                    st.info('Preview only. Approve to apply the proposed decision.')
+                    if st.button('Approve mixed-method plan'):
+                        try:
+                            s.mixed_approved=approve_mixed(s.mixed_preview,mixed_orders,mixed_quotes,mixed_unavailable)
+                            s.mixed_approved_fingerprint=s.mixed_preview['fingerprint']
+                            s.mixed_preview=None
+                        except ValueError as exc: st.error(str(exc))
+                    if st.button('Discard mixed-method plan'): s.mixed_preview=None
+            if s.get('mixed_approved'):
+                if s.mixed_approved_fingerprint!=__import__('focused_quotes').fingerprint(mixed_orders,mixed_quotes,[])+repr(sorted(mixed_unavailable))+repr(False):
+                    s.mixed_approved=None
+                    st.warning('Approved plan cleared because inputs changed.')
+                else: st.success('Mixed-method proposal approved. No transport booked.')
+        else:
+            s.mixed_preview=None; s.mixed_approved=None
+    except ValueError as exc:
+        s.mixed_preview=None; s.mixed_approved=None
+        st.error(str(exc))
+
+st.subheader('Competition demo · mixed methods')
+from demo_scenario import LABEL as DEMO_LABEL, load_demo
+from mixed_method import optimize as demo_optimize, preview as demo_preview, approve as demo_approve
+st.error(DEMO_LABEL)
+if st.button('Load Demo Scenario'):
+    s.demo_orders,s.demo_quotes=load_demo()
+    s.demo_unavailable=[]
+    s.demo_preview=None
+    s.demo_approved=None
+if s.get('demo_orders') is not None:
+    st.write('Four fictional shipments from one KL pickup to distinct Malaysian postcodes.')
+    st.dataframe(s.demo_orders)
+    unavailable=st.checkbox('Simulate disruption: vehicle provider unavailable',key='demo_disruption')
+    demo_disabled=['Synthetic Lalamove example'] if unavailable else []
+    if demo_disabled!=s.get('demo_unavailable'):
+        s.demo_unavailable=demo_disabled
+        s.demo_preview=None
+        s.demo_approved=None
+    plan=demo_optimize(s.demo_orders,s.demo_quotes,demo_disabled,demo=True)
+    left,right=st.columns(2)
+    left.metric('All-courier synthetic baseline',f"RM {plan['baseline_myr']:.2f}" if plan['baseline_myr'] is not None else 'NOT AVAILABLE')
+    right.metric('Mixed synthetic plan',f"RM {plan['total_myr']:.2f}" if plan['total_myr'] is not None else 'NOT READY')
+    st.write('Solver status:',plan['status'],plan['reason'])
+    st.dataframe(pd.DataFrame(plan.get('decisions',[])))
+    st.caption('Selected quote IDs, covered shipments, explicit stops, source and costs are fictional. No booking or payment.')
+    if st.button('Preview demo plan'):
+        s.demo_preview=demo_preview(s.demo_orders,s.demo_quotes,demo_disabled,demo=True)
+        s.demo_approved=None
+    if s.get('demo_preview'):
+        st.info('PROPOSAL ONLY — review before approval. No shipment has been booked.')
+        if st.button('Approve demo proposal'):
+            try:
+                s.demo_approved=demo_approve(s.demo_preview,s.demo_orders,s.demo_quotes,demo_disabled,demo=True)
+                s.demo_preview=None
+            except ValueError as exc: st.error(str(exc))
+        if st.button('Discard demo proposal'): s.demo_preview=None
+    if s.get('demo_approved'):
+        st.success('Synthetic plan approved for demonstration. No carrier booking or payment.')
+st.header('What do you need delivered?')
+st.caption('Operations jobs persist locally. Planning is a proposal; provider booking and tracking are recorded only after user evidence.')
+from delivery_operations import JobStore, checklist as intake_checklist
+from pathlib import Path
+ops_store=JobStore(Path('.data/delivery_jobs.sqlite'))
+ops_request=st.text_area('Describe your logistics goal',placeholder='Deliver these orders within their deadlines and budget. Three are urgent.')
+st.caption('Use the AI Logistics Assistant above for optional request interpretation. Enter actual orders and quotes below; descriptions alone never create customer data.')
+if st.button('Load synthetic nationwide intake sample'):
+    s.ops_sample=sample_orders().assign(recipient=lambda frame:frame.order_id.map(lambda oid:'SYNTHETIC RECIPIENT '+oid),origin_postcode='',destination_postcode='')
+    st.warning('SYNTHETIC INTAKE SAMPLE — NOT CUSTOMER DATA. Exact postcodes must be supplied; city names do not determine them.')
+from sample_intake import load_sample_intake
+ops_upload=st.file_uploader('Import delivery operations CSV',type='csv',key='ops_csv_upload')
+if ops_upload is not None:
+    digest=hashlib.sha256(ops_upload.getvalue()).hexdigest()
+    if digest!=s.get('ops_upload_hash'):
+        try:
+            s.ops_sample=load_sample_intake(ops_upload.getvalue())
+            s.ops_upload_hash=digest
+            s.ops_editor_revision=s.get('ops_editor_revision',0)+1
+        except (ValueError,UnicodeError) as exc: st.error(f'Operations import rejected; existing orders retained: {exc}')
+else: s.ops_upload_hash=None
+ops_orders=st.data_editor(s.get('ops_sample',pd.DataFrame(columns=['order_id','recipient','origin_postcode','destination_postcode','weight_kg','length_cm','width_cm','height_cm','deadline_days'])),key=f'ops_orders_editor_{s.get("ops_editor_revision",0)}',num_rows='dynamic')
+missing_ops=intake_checklist(ops_orders.to_dict('records'))
+if missing_ops:
+    st.write('User action checklist')
+    for item in missing_ops[:20]: st.write('• '+item)
+if st.button('Create delivery job'):
+    if ops_orders.empty: st.error('Enter at least one order first.')
+    else:
+        s.ops_job_id=ops_store.create(ops_orders)
+        st.info('Created job '+s.ops_job_id)
+if s.get('mixed_approved') and 'mixed_quotes' in locals():
+    if st.button('Create delivery job from approved quote plan'):
+        try:
+            if missing_ops: raise ValueError('Complete the recipient and postcode checklist first.')
+            if set(ops_orders.order_id.astype(str)) != set(mixed_orders.order_id.astype(str)):
+                raise ValueError('Job orders must match the approved quote plan exactly.')
+            from focused_quotes import fingerprint as _handoff_fingerprint
+            expected=_handoff_fingerprint(mixed_orders,mixed_quotes,[])+repr(sorted(mixed_unavailable))+repr(False)
+            if s.get('mixed_approved_fingerprint')!=expected:
+                raise ValueError('Approved plan is stale; preview and approve again.')
+            s.ops_job_id=ops_store.create(ops_orders)
+            ops_store.propose(s.ops_job_id,ops_orders,mixed_quotes,mixed_unavailable)
+            st.info('Delivery job created for review. Approve this job separately before preparation.')
+            st.rerun()
+        except ValueError as exc: st.error(str(exc))
+if s.get('ops_job_id'):
+    job=ops_store.get(s.ops_job_id)
+    st.write('Job ID:',job['job_id'],'· State:',job['state'])
+    st.write('Orders:',len(job['orders']),'· Missing information:',len(intake_checklist(job['orders'])))
+    st.dataframe(pd.DataFrame(job['events']))
+    st.write('Agent actions: validate intake, review quote coverage, prepare a proposal. User actions: supply missing fields, approve, book with provider, record evidence.')
+    if st.button('Update job intake'):
+        ops_store.set_inputs(s.ops_job_id,ops_orders,[])
+        st.rerun()
+    if 'mixed_quotes' in locals() and mixed_quotes and not missing_ops:
+        if st.button('Propose job plan from imported quotes'):
+            try:
+                ops_store.propose(s.ops_job_id,ops_orders,mixed_quotes,mixed_unavailable)
+                st.rerun()
+            except ValueError as exc: st.error(str(exc))
+        if job['state']=='READY_FOR_REVIEW' and st.button('Approve delivery job plan'):
+            try:
+                ops_store.approve(s.ops_job_id,ops_orders,mixed_quotes,mixed_unavailable)
+                st.rerun()
+            except ValueError as exc: st.error(str(exc))
+    if job['state']=='APPROVED' and st.button('Mark shipment preparation complete'):
+        ops_store.transition(s.ops_job_id,'PREPARED','user','Manifest and package details reviewed')
+        st.rerun()
+    if job['state']=='PREPARED' and st.button('Handoff for manual booking'):
+        ops_store.transition(s.ops_job_id,'AWAITING_BOOKING','user','Provider booking details prepared')
+        st.rerun()
+    if job['state']=='AWAITING_BOOKING':
+        booking_reference=st.text_input('Provider booking reference')
+        tracking_id=st.text_input('Tracking ID')
+        booking_evidence=st.text_input('Booking confirmation evidence reference')
+        if st.button('Record externally confirmed booking'):
+            try:
+                ops_store.record_booking(s.ops_job_id,booking_reference,tracking_id,booking_evidence)
+                st.rerun()
+            except ValueError as exc: st.error(str(exc))
+    if job['state']=='BOOKED':
+        transit_evidence=st.text_input('Carrier transit evidence')
+        if st.button('Record in transit'):
+            try:
+                ops_store.transition(s.ops_job_id,'IN_TRANSIT','user',transit_evidence)
+                st.rerun()
+            except ValueError as exc: st.error(str(exc))
+    if job['state']=='IN_TRANSIT':
+        delivery_evidence=st.text_input('Carrier delivery evidence')
+        if st.button('Record delivered'):
+            try:
+                ops_store.transition(s.ops_job_id,'DELIVERED','user',delivery_evidence)
+                st.rerun()
+            except ValueError as exc: st.error(str(exc))
+    if job['state'] in ('APPROVED','PREPARED','AWAITING_BOOKING','BOOKED','IN_TRANSIT','DELIVERED'):
+        st.download_button('Download approved job manifest',ops_store.manifest(s.ops_job_id).to_csv(index=False),'delivery_job_manifest.csv','text/csv')
+
+st.subheader('Delivery operations status')
+from collections import Counter
+with ops_store._db() as _ops_db:
+    _counts=Counter(row[0] for row in _ops_db.execute('SELECT state FROM jobs'))
+for label,state in [('Needs information','NEEDS_INFORMATION'),('Awaiting approval','READY_FOR_REVIEW'),('Awaiting booking','AWAITING_BOOKING'),('Booked','BOOKED'),('In transit','IN_TRANSIT'),('Delivered','DELIVERED'),('Needs attention','NEEDS_ATTENTION')]:
+    st.write(f'{label}: {_counts[state]}')

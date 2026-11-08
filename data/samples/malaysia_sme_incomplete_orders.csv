@@ -1,0 +1,6 @@
+order_id,origin,destination,weight_kg,length_cm,width_cm,height_cm,deadline_days,recipient,origin_postcode,destination_postcode
+SME001,Kuala Lumpur,Kuala Lumpur,1.5,25,20,12,2,SYNTHETIC CUSTOMER A,50000,50000
+SME002,Kuala Lumpur,George Town,3,32,24,18,5,,50000,10000
+SME003,Kuala Lumpur,Johor Bahru,5,40,30,24,6,SYNTHETIC CUSTOMER C,50000,
+SME004,Kuala Lumpur,Kota Kinabalu,2,28,22,16,9,SYNTHETIC CUSTOMER D,,88000
+SME005,Kuala Lumpur,Kuching,4,35,27,22,9,SYNTHETIC CUSTOMER E,50000,93000
