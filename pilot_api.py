@@ -3,10 +3,14 @@ import json
 import os
 import re
 import sqlite3
+import psycopg
+from psycopg_pool import PoolTimeout
+from psycopg.conninfo import conninfo_to_dict
 from functools import lru_cache
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from pilot_store import OperatorVerifier, PilotStore
+from postgres_pilot_store import PostgresPilotStore
 
 MAX_BODY = 65536
 RECORD_ID = r'[A-Za-z0-9-]{1,80}'
@@ -24,17 +28,30 @@ def configured_store(env=None, mount_check=None, persistent_root='/var/data'):
     mount_check = mount_check or os.path.ismount
     if env.get('PILOT_ENABLED') != '1':
         return None
-    names = ('PILOT_OIDC_ISSUER','PILOT_OIDC_AUDIENCE','PILOT_OIDC_SUBJECT',
-             'PILOT_OIDC_JWKS_URL','PILOT_DB')
-    if any(not env.get(name) for name in names) or not mount_check(persistent_root):
-        return None
-    path = Path(env['PILOT_DB']).resolve()
-    if Path(persistent_root).resolve() not in path.parents:
+    names = ('PILOT_OIDC_ISSUER','PILOT_OIDC_AUDIENCE','PILOT_OIDC_SUBJECT', 'PILOT_OIDC_JWKS_URL')
+    if any(not env.get(name) for name in names):
         return None
     try:
-        return _cached_store(str(path),str(Path(persistent_root).resolve()),env['PILOT_OIDC_ISSUER'],
-                             env['PILOT_OIDC_AUDIENCE'],env['PILOT_OIDC_SUBJECT'],env['PILOT_OIDC_JWKS_URL'])
-    except (ValueError,OSError,sqlite3.Error):
+        identity = tuple(env[name] for name in names)
+        backend = env.get('PILOT_DB_BACKEND')
+        if backend == 'postgres':
+            url = env.get('PILOT_DATABASE_URL', '')
+            parsed = conninfo_to_dict(url)
+            if not all(parsed.get(name) for name in ('host', 'user', 'password', 'dbname')):
+                return None
+            if parsed.get('sslmode') not in (None, 'verify-full'):
+                return None
+            ca = env.get('PILOT_DATABASE_CA_FILE', '')
+            if not ca or not Path(ca).is_file():
+                return None
+            return _cached_postgres(url, ca, *identity)
+        if backend != 'sqlite' or not env.get('PILOT_DB') or not mount_check(persistent_root):
+            return None
+        path = Path(env['PILOT_DB']).resolve()
+        if Path(persistent_root).resolve() not in path.parents:
+            return None
+        return _cached_store(str(path), str(Path(persistent_root).resolve()), *identity)
+    except (ValueError, OSError, RuntimeError, sqlite3.Error, psycopg.Error, PoolTimeout):
         return None
 
 
@@ -42,6 +59,14 @@ def configured_store(env=None, mount_check=None, persistent_root='/var/data'):
 def _cached_store(path,root,issuer,audience,subject,jwks_url):
     verifier=OperatorVerifier(issuer,audience,subject,jwks_url=jwks_url)
     return PilotStore(path,verifier,root)
+
+
+@lru_cache(maxsize=2)
+def _cached_postgres(url, ca, issuer, audience, subject, jwks_url):
+    verifier = OperatorVerifier(issuer, audience, subject, jwks_url=jwks_url)
+    return PostgresPilotStore(url, verifier, conn_kwargs={
+        'sslmode': 'verify-full', 'sslrootcert': ca, 'connect_timeout': 5,
+        'application_name': 'kargokawan_pilot'})
 
 
 def _response(start_response, status, value):
@@ -136,6 +161,8 @@ def handle(environ,start_response,store):
         return _response(start_response,'403 Forbidden',{'error':'Operator identity not authorized.'})
     try:
         if route=='/pilot/status' and method=='GET':
+            if hasattr(store, 'health'):
+                store.health()
             return _response(start_response,'200 OK',{'status':'READY','easyparcel_oauth':'NOT_CONNECTED'})
         if route=='/pilot/jobs':
             if method=='GET':
@@ -181,6 +208,6 @@ def handle(environ,start_response,store):
     except ValueError as exc:
         return _response(start_response,'409 Conflict' if 'changed' in str(exc) or 'reused' in str(exc) else '400 Bad Request',
                          {'error':str(exc)})
-    except sqlite3.Error:
+    except (sqlite3.Error, psycopg.Error, PoolTimeout):
         return _response(start_response,'503 Service Unavailable',{'status':'STORAGE_UNAVAILABLE',
             'reason':'Pilot storage is temporarily unavailable.'})

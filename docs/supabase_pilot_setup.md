@@ -1,0 +1,47 @@
+# Optional Supabase PostgreSQL storage for the restricted pilot
+
+This branch adds a **server-side PostgreSQL store for draft jobs and manual/public-reference quote records**. It does not connect to a Supabase project, deploy Render, migrate existing SQLite records, activate EasyParcel OAuth, or authenticate a live courier. The public fictional demo stays in disposable local SQLite. The reported pilot frontend is `https://kargokawanai-pilot.streamlit.app`; verify its actual deployment and OIDC redirect in your Streamlit dashboard before using it. Production EasyParcel OAuth start/callback remain HTTP 403. The authenticated Streamlit pilot UI still sends its OIDC ID token only from server-side Python over HTTPS; Render verifies signature, issuer, audience, expiry, and exact allowlisted subject for each API operation. Database passwords and the database certificate belong **only on Render**.
+
+## Storage selection and safety boundary
+
+Set `PILOT_DB_BACKEND=postgres` to select PostgreSQL. There is **no fallback** to temporary SQLite if URL, CA certificate, private schema, or database access is missing. The pilot API returns `STORAGE_UNAVAILABLE` (503) after authentication; unauthenticated calls still return 401. `/health` is only a process liveness probe, not proof of pilot database access. With a verified operator token, `/pilot/status` checks database connectivity and reports `READY` only if it succeeds.
+
+The old `PILOT_DB_BACKEND=sqlite` option is retained for tests and a real `/var/data` persistent mount; it checks `os.path.ismount`. Never use it on Render Free. Both backends store *draft* jobs and manual quote evidence only. Quote records cannot claim `LIVE_AUTHENTICATED` or `SYNTHETIC`. Editing orders atomically invalidates associated quote drafts. Idempotency keys and optimistic versions protect writes. The private PostgreSQL schema is not the Supabase API-exposed `public` schema.
+
+This is a **single-operator** design. Render checks a signed OIDC ID token against one exact subject on every request, and every job/quote query includes that verified subject in its SQL owner predicate. The database role has no browser exposure and is restricted to the private schema. Row Level Security is not used for these server-only tables; before expanding to multiple operators or exposing Supabase Data APIs, add independently reviewed database RLS and role separation. A guessed job or quote ID never acts as authorization.
+
+## Manual setup, without putting secrets in Git
+
+1. In your own Supabase account, create a Free project. Inspect its current [plan limits](https://supabase.com/docs/guides/platform/billing-on-supabase), [pause policy](https://supabase.com/docs/guides/platform/free-project-pausing), and [backup options](https://supabase.com/docs/guides/platform/backups). Free projects can pause after inactivity and have no managed daily backup entitlement. Make periodic encrypted, access-controlled off-site logical backups yourself. This is suitable only for a restricted, low-volume pilot, not a durability guarantee.
+2. In the Supabase SQL editor, provision a **private schema and dedicated login** for the Render service. Choose a strong unique password privately. Replace placeholders below locally, do not paste the resulting SQL or password in chat, screenshots, logs, or source. Run as a database administrator; then retain the generated password in a secret manager. The runtime role needs access only to this schema. Do not grant it access to other user tables or expose the schema through Supabase Data API settings.
+
+   ```sql
+   CREATE ROLE kargokawan_pilot_login LOGIN PASSWORD '<GENERATED-PRIVATE-PASSWORD>';
+   CREATE SCHEMA kargokawan_pilot AUTHORIZATION kargokawan_pilot_login;
+   REVOKE ALL ON SCHEMA kargokawan_pilot FROM PUBLIC;
+   ```
+
+   For an existing installation, review roles and privileges before changing anything. `PostgresPilotStore` checks that this schema already exists and installs only its versioned tables within it. No SQL migration touches the default `public` schema.
+3. In Supabase **Connect**, copy the actual **Session pooler** PostgreSQL URL for this project. Use its exact host, port and project reference. For a custom role, the shared-pooler username is `[ROLE].[PROJECT-REF]` (here `kargokawan_pilot_login.[PROJECT-REF]`); supply its password privately. Verify the role can connect to the private schema. Supabase's [connection guide](https://supabase.com/docs/guides/database/connecting-to-postgres) explains the session pooler and IPv4 routing. Do not assume a host, project reference, or connection string from examples. Avoid the transaction pooler for this session-oriented backend unless separately tested. Limit the service to one worker initially; its local psycopg pool uses at most three database connections.
+4. Download the project database CA certificate from Supabase's database settings. Supply it to Render as a **secret file** at `/etc/secrets/<your-certificate-filename>` (check the actual path in Render). [Supabase's SSL guide](https://supabase.com/docs/guides/platform/ssl-enforcement) explains using `sslmode=verify-full` and `sslrootcert` to verify the server certificate. The code forces `verify-full`, requires the CA file, and rejects a connection URL that requests weaker TLS. Verify the certificate and connection using the connection string from *your* dashboard. Do not commit the certificate or password.
+5. On Render, choose the reviewed branch and Dockerfile `Dockerfile.oauth`. The shared Supavisor session pooler offers IPv4 without the paid IPv4 add-on according to Supabase, and Render documents outbound access to external databases on its Free service. This makes the architecture technically plausible on free plans, but **no connection between the actual Render service and a real Supabase project was tested here**. Keep the free web service only if its sleep/startup behavior is acceptable. Configure these **Render-only** secret variables:
+
+   ```text
+   PILOT_ENABLED=1
+   PILOT_DB_BACKEND=postgres
+   PILOT_DATABASE_URL=<actual session-pooler PostgreSQL URL with private-role credentials>
+   PILOT_DATABASE_CA_FILE=<absolute path to the Render secret CA file>
+   PILOT_OIDC_ISSUER=<exact trusted HTTPS issuer>
+   PILOT_OIDC_AUDIENCE=<Streamlit OIDC client ID>
+   PILOT_OIDC_SUBJECT=<exact allowlisted operator sub>
+   PILOT_OIDC_JWKS_URL=<trusted HTTPS JWKS URL>
+   ```
+
+   Keep the pilot Streamlit deployment's `[auth]` OIDC secrets and `PILOT_OPERATOR_SUB` as documented in [pilot_auth_integration.md](pilot_auth_integration.md). The reported pilot host is `kargokawanai-pilot.streamlit.app`, so verify that **its** `[auth].redirect_uri` and Google OAuth redirect registration use that exact host with `/oauth2callback`; the older public demo host in that guide is a separate app. **Do not put `PILOT_DATABASE_URL`, database credentials, or the CA file in Streamlit Secrets**. No Supabase API key or service role key is needed. Remove or leave unset `PILOT_DB`; it has no role in PostgreSQL mode. Verify that Render's env and secret-file features are available for your actual service plan before relying on them.
+6. Deploy only after reviewing the database setup. `/health` should return 200; `/pilot/status` without an ID token must return 401. Sign in as the allowlisted operator through the Streamlit pilot UI: its status should be `READY` only when the backend can verify identity and reach the database. Test one **fictional** draft job, restart Render, and verify that job remains. Also test a bad/missing database configuration and verify storage becomes unavailable instead of reverting to SQLite. These are manual checks; this branch did not perform them against Supabase.
+
+## Data retention and recovery
+
+PostgreSQL persists independently of Render's ephemeral filesystem, but Supabase Free can pause and has resource limits. Follow Supabase's [Free-plan backup guidance](https://supabase.com/docs/guides/platform/backups): export regular logical dumps with its CLI `db dump` into an encrypted, access-controlled off-site location. On a separate test project, restore a dump using the current official restore procedure, reprovision the private role password if needed, and verify a fictional pilot job. Do not treat an untested dump as recoverable. If the project pauses, check its status in the Supabase dashboard, resume it there, and verify `/pilot/status` and a draft job after reconnection. Define retention/deletion and access procedures, test backups and restores, confirm live OIDC and TLS connectivity, review access controls and availability, and obtain a security review before entering actual customer data. The database is a draft-record store, not a carrier evidence vault or booking ledger. Existing SQLite demo records are not automatically migrated. Do not use the disabled EasyParcel OAuth token store on Render Free: it still uses SQLite and has no PostgreSQL token adapter. Account linking needs a separate reviewed token-storage and provider-account verification change.
+
+Local verification uses `KK_TEST_POSTGRES_DSN` pointing to a disposable PostgreSQL instance for `tests/test_postgres_pilot_store.py`. The production configuration tests ensure TLS cannot be downgraded. The local container test itself uses synthetic credentials and does not assert a live Supabase TLS handshake. A real Render-to-Supabase test with certificate and exact project settings remains mandatory before pilot enablement.

@@ -36,19 +36,21 @@ PILOT_OIDC_ISSUER=<exact HTTPS OIDC issuer>
 PILOT_OIDC_AUDIENCE=<same OIDC client ID used by Streamlit>
 PILOT_OIDC_SUBJECT=<exact allowlisted operator subject>
 PILOT_OIDC_JWKS_URL=<trusted HTTPS JWKS URL from provider discovery>
-PILOT_DB=/var/data/pilot.sqlite
+PILOT_DB_BACKEND=postgres
+PILOT_DATABASE_URL=<Render-only session-pooler connection string>
+PILOT_DATABASE_CA_FILE=<Render secret-file path for Supabase CA>
 ```
 
-Render must have an **actual paid persistent disk mounted at `/var/data`** before setting `PILOT_ENABLED=1`. The backend uses `os.path.ismount('/var/data')` and refuses pilot operations with HTTP 503 if the mount, configuration or database path is missing. A directory merely named `/var/data` is insufficient. Do not use Streamlit's local SQLite for real jobs, and do not point `PILOT_DB` or `EASYPARCEL_OAUTH_DB` to ephemeral storage. [Render's disk documentation](https://render.com/docs/disks) says disks attach to paid services; its [Free-plan documentation](https://render.com/docs/free) says free filesystems are ephemeral. This is a cost-bearing upgrade. Configure encrypted backups, restricted disk access and a migration/rotation plan before real customer data.
+The optional PostgreSQL backend can run on Render Free with a separately configured Supabase Free database; see [supabase_pilot_setup.md](supabase_pilot_setup.md) for private-schema provisioning, TLS verification, connection pooling, backup and pause caveats. Missing PostgreSQL settings or connectivity return 503; no SQLite fallback occurs. The former `PILOT_DB_BACKEND=sqlite` path still requires an actual mounted persistent disk under `/var/data` and is unsuitable for Render Free. Neither option persists EasyParcel OAuth tokens on Render Free.
 
-`Dockerfile.oauth` already copies the pilot API and store. Deploy this reviewed branch to the existing Render Docker web service only after confirming the disk and secrets. Keep the EasyParcel OAuth credentials and callback settings separate; this branch does not require them for `/pilot/status` or draft jobs. The existing health endpoint should return 200; without a valid operator token `/pilot/status` returns 401, and with missing storage it returns 503. After sign-in and disk verification, `/pilot/status` returns `READY` and `easyparcel_oauth: NOT_CONNECTED`.
+`Dockerfile.oauth` already copies the pilot API and store. Deploy this reviewed branch to the existing Render Docker web service only after confirming the disk and secrets. Keep the EasyParcel OAuth credentials and callback settings separate; this branch does not require them for `/pilot/status` or draft jobs. The existing health endpoint should return 200; without a valid operator token `/pilot/status` returns 401, and with missing storage it returns 503. After sign-in and database verification, `/pilot/status` returns `READY` and `easyparcel_oauth: NOT_CONNECTED`.
 
 ## Remaining release blockers
 
 1. Select a real OIDC provider, configure its Streamlit and Render settings, and establish the exact operator subject. Test the signed ID-token bridge with that provider. Mocked tests do not prove the IdP configuration works.
-2. Upgrade Render to a paid plan with a mounted persistent disk or implement a managed persistent database adapter. Verify the mount in the live container; a free service cannot persist pilot jobs or OAuth tokens safely.
+2. For draft jobs, provision and independently verify the restricted Supabase PostgreSQL backend or a paid Render persistent disk. The free Render filesystem cannot persist OAuth tokens safely; EasyParcel linking stays disabled.
 3. Review actual public deployment and job migration. The existing demo operations still live on disposable local disk and are not migrated into the owner-scoped pilot API. The pilot UI creates and edits private job drafts and quote drafts, but does not yet hand them to the optimiser or approval/booking workflow.
 4. Confirm a provider-documented stable EasyParcel account identifier and a safe account verification call before binding any OAuth token to this operator. Keep OAuth start/callback disabled until then, with explicit consent and revocation behaviour tested.
-5. Complete a security review of OIDC metadata/JWKS configuration, token lifetime, request limits, audit logging without PII, disk backups and incident procedures before admitting real customer orders.
+5. Complete a security review of OIDC metadata/JWKS configuration, token lifetime, request limits, audit logging without PII, database backups and incident procedures before admitting real customer orders.
 
 To disable pilot access immediately, remove `PILOT_ENABLED` on Render and rotate/revoke the operator IdP session as needed. To disable EasyParcel, its OAuth routes already return 403; revoke credentials in Developer Hub if any are later issued. No production OAuth activation is part of this branch.

@@ -57,7 +57,7 @@ def test_pilot_authentication_and_storage_gate(tmp_path):
     gated=create_app()
     assert call(gated,'/pilot/status',token=token())[0]==503
     assert configured_store({'PILOT_ENABLED':'1','PILOT_DB':'/var/data/pilot.sqlite'},mount_check=lambda path:False) is None
-    env={'PILOT_ENABLED':'1','PILOT_DB':str(tmp_path/'pilot-configured.sqlite'),
+    env={'PILOT_ENABLED':'1','PILOT_DB_BACKEND':'sqlite','PILOT_DB':str(tmp_path/'pilot-configured.sqlite'),
          'PILOT_OIDC_ISSUER':'https://issuer.example','PILOT_OIDC_AUDIENCE':'frontend-client',
          'PILOT_OIDC_SUBJECT':'allowed','PILOT_OIDC_JWKS_URL':'https://issuer.example/keys'}
     assert configured_store(env,mount_check=lambda path:False,persistent_root=tmp_path) is None
