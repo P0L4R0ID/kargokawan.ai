@@ -492,3 +492,102 @@ with ops_store._db() as _ops_db:
     _counts=Counter(row[0] for row in _ops_db.execute('SELECT state FROM jobs'))
 for label,state in [('Needs information','NEEDS_INFORMATION'),('Awaiting approval','READY_FOR_REVIEW'),('Awaiting booking','AWAITING_BOOKING'),('Booked','BOOKED'),('In transit','IN_TRANSIT'),('Delivered','DELIVERED'),('Needs attention','NEEDS_ATTENTION')]:
     st.write(f'{label}: {_counts[state]}')
+
+st.header('Collect real shipping quotations')
+st.caption('Manual evidence only · EasyParcel parcels and Lalamove route vehicles · both APIs NOT_CONNECTED')
+from quote_guidance import request_checklist, request_details, vehicle_candidates, make_draft, collection_progress
+from mixed_method import preview as guided_preview, approve as guided_approve
+from focused_quotes import fingerprint as guided_fingerprint
+import json as _guided_json
+if s.get('ops_job_id'):
+    guided_job=ops_store.get(s.ops_job_id)
+    if not intake_checklist(guided_job['orders']):
+        st.subheader('Quote request preparation')
+        st.dataframe(pd.DataFrame(request_details(guided_job['orders'])))
+        st.download_button('Download minimal quote request CSV',pd.DataFrame(request_details(guided_job['orders'])).to_csv(index=False),'quote_request_details.csv','text/csv')
+        for task in request_checklist(guided_job['orders']): st.write('• '+task)
+        for candidate in vehicle_candidates(guided_job['orders']):
+            st.info('Possible Lalamove quote request, not confirmed service: '+', '.join(candidate['shipment_ids']))
+            st.json(candidate['stops'])
+    else: st.info('Complete the job intake checklist before requesting route quotes.')
+else: st.info('Create a delivery job first; the quote request uses its confirmed shipment details.')
+with st.form('manual_quote_entry'):
+    st.subheader('Record a manually obtained quotation')
+    entry_provider=st.selectbox('Quoted provider',['EasyParcel Malaysia','Lalamove Malaysia'])
+    entry_id=st.text_input('Provider quote ID or your evidence ID (required)')
+    entry_service=st.text_input('Quoted service')
+    entry_ids=st.text_input('Covered order IDs separated by semicolons')
+    entry_origin=st.text_input('Pickup postcode (five digits)')
+    entry_destination=st.text_input('Destination postcode (parcel or first vehicle stop)')
+    entry_pickup=st.text_input('Pickup location or reference')
+    entry_stops=st.text_area('Vehicle stops JSON: sequence, shipment_id, postcode',value='')
+    entry_weight=st.text_input('Quoted total physical weight (kg)')
+    entry_capacity=st.text_input('Vehicle capacity (kg), if applicable')
+    entry_length=st.text_input('Maximum eligible length (cm)')
+    entry_width=st.text_input('Maximum eligible width (cm)')
+    entry_height=st.text_input('Maximum eligible height (cm)')
+    entry_price=st.text_input('Complete payable amount (MYR)')
+    entry_full=st.checkbox('This is the full payable amount')
+    entry_tax=st.selectbox('Tax treatment',['UNKNOWN','included','excluded'])
+    entry_surcharge=st.selectbox('Surcharge treatment',['UNKNOWN','included','excluded'])
+    entry_expiry=st.text_input('Quote expiry ISO timestamp with time zone')
+    entry_transit=st.text_input('Estimated transit days')
+    entry_restrictions=st.text_input('Restrictions or none')
+    entry_evidence=st.text_input('Provider evidence reference or saved document')
+    review_entry=st.form_submit_button('Review quote draft')
+if review_entry:
+    try:
+        stops=_guided_json.loads(entry_stops) if entry_stops.strip() else []
+        fields={'quote_id':entry_id,'provider':entry_provider,'service':entry_service,'transport_method':'parcel_courier' if entry_provider=='EasyParcel Malaysia' else 'multi_stop_vehicle','origin_postcode':entry_origin,'destination_postcode':entry_destination,'pickup_location':entry_pickup,'dropoff_locations':stops,'shipment_ids':entry_ids,'physical_weight_kg':entry_weight,'capacity_kg':entry_capacity,'length_cm':entry_length,'width_cm':entry_width,'height_cm':entry_height,'displayed_cost_myr':entry_price,'full_cost':'true' if entry_full else 'false','tax_status':entry_tax,'surcharge_status':entry_surcharge,'valid_until':entry_expiry,'transit_days':entry_transit,'restrictions':entry_restrictions,'source_reference':entry_evidence}
+        s.guided_draft=make_draft(fields)
+    except (ValueError,TypeError) as exc: st.error(str(exc))
+if s.get('guided_draft'):
+    from hybrid_quotes import review as review_guided_quote
+    guided_orders=ops_orders.to_dict('records') if not ops_orders.empty else []
+    draft_review=review_guided_quote(s.guided_draft,guided_orders)
+    st.write('Draft review:',draft_review['status'],draft_review['reason'])
+    if draft_review['missing']: st.write('Still needed:',', '.join(draft_review['missing']))
+    st.caption('To correct the draft, edit the form and select Review quote draft again.')
+    if st.button('Save reviewed manual quote'):
+        s.setdefault('guided_quotes',[]).append(s.guided_draft)
+        s.guided_proposal=None
+        s.guided_approved=None
+        s.guided_draft=None
+if s.get('guided_quotes') and not ops_orders.empty:
+    guided_all=s.guided_quotes+focused_quotes.get('EasyParcel Malaysia',[])+focused_quotes.get('Lalamove Malaysia',[])
+    try:
+        progress=collection_progress(ops_orders,guided_all)
+        st.subheader('Quotation progress')
+        st.dataframe(pd.DataFrame([{'Order ID':oid,'Eligible courier quote IDs':', '.join(ids) or 'NONE'} for oid,ids in progress['courier_by_order'].items()]))
+        st.dataframe(pd.DataFrame(progress['reviews']))
+        st.write('Vehicle route subsets:',progress['vehicle_subsets'])
+        for action in progress['next_actions']: st.write('Next action: '+action)
+        st.write('Planning status:',progress['plan']['status'])
+        if progress['plan']['status'] in ('READY','SOLVER LIMITED'):
+            st.metric('Quoted mixed plan (MYR)',str(progress['plan']['total_myr']))
+            st.write('Selected quote evidence:')
+            st.dataframe(pd.DataFrame(progress['plan']['decisions']))
+            if st.button('Preview guided quote plan'):
+                s.guided_proposal=guided_preview(ops_orders,guided_all)
+                s.guided_approved=None
+            if s.get('guided_proposal'):
+                if s.guided_proposal['fingerprint']!=guided_fingerprint(ops_orders,guided_all,[])+repr([])+repr(False):
+                    s.guided_proposal=None; s.guided_approved=None
+                    st.warning('Quote or order inputs changed. Preview again.')
+                else:
+                    st.info('Plan proposal only. No booking or payment.')
+                    if st.button('Approve guided quote plan'):
+                        s.guided_approved=guided_approve(s.guided_proposal,ops_orders,guided_all)
+                        s.guided_approved_fingerprint=guided_fingerprint(ops_orders,guided_all,[])+repr([])+repr(False)
+                        s.guided_proposal=None
+                    if st.button('Discard guided quote plan'): s.guided_proposal=None
+            if s.get('guided_approved') and s.get('ops_job_id'):
+                if s.get('guided_approved_fingerprint')!=guided_fingerprint(ops_orders,guided_all,[])+repr([])+repr(False):
+                    s.guided_approved=None
+                    st.warning('Approved quote plan is stale; review and approve again.')
+                elif st.button('Send approved plan to delivery job for separate review'):
+                    try:
+                        ops_store.propose(s.ops_job_id,ops_orders,guided_all)
+                        st.success('Job proposal created. Approve the delivery job separately before preparation.')
+                    except ValueError as exc: st.error(str(exc))
+    except ValueError as exc: st.error(str(exc))
