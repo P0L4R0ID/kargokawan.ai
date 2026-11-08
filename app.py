@@ -367,7 +367,21 @@ st.caption('Operations jobs persist locally. Planning is a proposal; provider bo
 from delivery_operations import JobStore, checklist as intake_checklist
 from pathlib import Path
 ops_store=JobStore(Path('.data/delivery_jobs.sqlite'))
-ops_request=st.text_area('Describe your logistics goal',placeholder='Deliver these orders within their deadlines and budget. Three are urgent.')
+from conversation_intake import extract as extract_intake, followups as intake_followups, validate_draft
+st.subheader('Tell KargoKawan what you need delivered')
+st.caption('Deterministic guided intake: only labeled facts are extracted. The AI provider is optional; no missing customer details are guessed.')
+ops_request=st.text_area('Describe your logistics goal',placeholder='Order SME001: from Kuala Lumpur 50000 to Kuching 93000, 2 kg, 30x20x10 cm, within 7 days, recipient Customer A; budget RM50')
+if st.button('Extract explicit order details'):
+    draft=extract_intake(ops_request)
+    s.ops_request_notes=draft['notes']
+    s.ops_requested_budget=draft['budget_myr']
+    if not draft['orders'].empty:
+        s.ops_sample=draft['orders']
+        s.ops_editor_revision=s.get('ops_editor_revision',0)+1
+if s.get('ops_request_notes'):
+    for note in s.ops_request_notes: st.info(note)
+if s.get('ops_requested_budget'):
+    st.write('User-stated budget (MYR):',s.ops_requested_budget,'· Check quote totals before approval.')
 st.caption('Use the AI Logistics Assistant above for optional request interpretation. Enter actual orders and quotes below; descriptions alone never create customer data.')
 if st.button('Load synthetic nationwide intake sample'):
     s.ops_sample=sample_orders().assign(recipient=lambda frame:frame.order_id.map(lambda oid:'SYNTHETIC RECIPIENT '+oid),origin_postcode='',destination_postcode='')
@@ -388,6 +402,18 @@ missing_ops=intake_checklist(ops_orders.to_dict('records'))
 if missing_ops:
     st.write('User action checklist')
     for item in missing_ops[:20]: st.write('• '+item)
+guided_questions=intake_followups(ops_orders)
+if guided_questions:
+    st.write('Focused follow-up questions')
+    for question in guided_questions[:20]: st.write('• '+question)
+else:
+    st.success('Planning intake complete. Next: collect complete EasyParcel courier and Lalamove route quotations, including taxes, validity and restrictions. Booking requires separate approval and external confirmation.')
+if st.button('Confirm corrected draft and create job'):
+    try:
+        valid=validate_draft(ops_orders)
+        s.ops_job_id=ops_store.create(valid)
+        st.success('Confirmed intake saved as job '+s.ops_job_id+'. Planning can begin after quote evidence is supplied; no booking was made.')
+    except ValueError as exc: st.error(str(exc))
 if st.button('Create delivery job'):
     if ops_orders.empty: st.error('Enter at least one order first.')
     else:
