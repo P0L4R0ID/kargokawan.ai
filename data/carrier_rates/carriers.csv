@@ -1,0 +1,15 @@
+provider,provider_type,pricing_access,primary_source_url,verification_status,observed_at
+J&T Express Malaysia,carrier,calculator,https://www.jtexpress.my/index.php/shipping-rates,NEEDS_MANUAL_ACCESS,2026-11-08
+Pos Malaysia / Pos Laju / MELPlus,carrier,calculator and contract API,https://www.pos.com.my/,NEEDS_MANUAL_ACCESS,2026-11-08
+Ninja Van Malaysia,carrier,price estimate and account rate card,https://www.ninjavan.co/en-my/support/shipper-support/pricing-and-coverage/how-to-calculate-and-check-shipping-rates,NEEDS_MANUAL_ACCESS,2026-11-08
+DHL eCommerce Malaysia,carrier,business quote,https://www.dhl.com/my-en/home/ecommerce/request-a-quote.html,NEEDS_MANUAL_ACCESS,2026-11-08
+City-Link Express,carrier,calculator,https://www.citylinkexpress.com/calculator/,NEEDS_MANUAL_ACCESS,2026-11-08
+SPX Express,carrier,portal rate card,https://spx.com.my/en/terms-of-service.html,NEEDS_MANUAL_ACCESS,2026-11-08
+Best Express,carrier,NOT_OBTAINED,NOT_OBTAINED,NEEDS_MANUAL_ACCESS,2026-11-08
+Skynet,carrier,calculator,https://skynet.com.my/tariff-calculator,NEEDS_MANUAL_ACCESS,2026-11-08
+Aramex Malaysia,carrier,downloadable guide and calculator,https://www.aramex.com/my/en/services-solutions/service-rate-guide,NEEDS_MANUAL_ACCESS,2026-11-08
+GDEX,carrier,NOT_OBTAINED,NOT_OBTAINED,NEEDS_MANUAL_ACCESS,2026-11-08
+EasyParcel Malaysia,aggregator,aggregator public starting prices,https://easyparcel.com/my/shipping-rates/,NEEDS_MANUAL_ACCESS,2026-11-08
+Lalamove Malaysia,vehicle,vehicle and additional-stop pricing,https://www.lalamove.com/en-my/all-vehicle-pricing-detail,NEEDS_MANUAL_ACCESS,2026-11-08
+TheLorry Malaysia,vehicle,distance and vehicle quote,https://thelorry.com/my/business/faq2/,NEEDS_MANUAL_ACCESS,2026-11-08
+Lazada Express,carrier,NOT_OBTAINED,NOT_OBTAINED,NEEDS_MANUAL_ACCESS,2026-11-08
