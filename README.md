@@ -344,3 +344,7 @@ A separate, server-side OAuth callback prototype and deployment guide are in [do
 ### Public Streamlit deployment and OAuth
 
 The frontend is deployed at `https://kargokawan.streamlit.app`. EasyParcel Open API OAuth account linking remains disabled because this public app lacks authenticated, owner-isolated delivery jobs. See [docs/render_oauth_deployment.md](docs/render_oauth_deployment.md) for the separate Render backend setup and security blockers. Do not enter real customer data into the current public multi-user job workflow.
+
+### Restricted operator pilot status
+
+The reported Render health-only backend is `https://kargokawan-oauth.onrender.com`; its registered EasyParcel callback is `/oauth/easyparcel/callback`. Live linking remains disabled. The public UI uses per-session disposable demo jobs, while an isolated server-side pilot store tests signed operator identity and owner-scoped job/quote operations. The pilot store is not connected to the UI. See [docs/secure_pilot_account_linking.md](docs/secure_pilot_account_linking.md) for paid persistent storage, OIDC and account-bridge prerequisites.

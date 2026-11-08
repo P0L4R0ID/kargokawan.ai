@@ -363,10 +363,11 @@ if s.get('demo_orders') is not None:
     if s.get('demo_approved'):
         st.success('Synthetic plan approved for demonstration. No carrier booking or payment.')
 st.header('What do you need delivered?')
-st.caption('Operations jobs persist locally. Planning is a proposal; provider booking and tracking are recorded only after user evidence.')
+st.caption('Demo operations jobs are scoped to this browser session and stored on disposable local disk. Use fictional data only; this is not a private customer workspace.')
 from delivery_operations import JobStore, checklist as intake_checklist
 from pathlib import Path
-ops_store=JobStore(Path('.data/delivery_jobs.sqlite'))
+from demo_storage import demo_job_path
+ops_store=JobStore(demo_job_path(s))
 from conversation_intake import extract as extract_intake, followups as intake_followups, validate_draft
 st.subheader('Tell KargoKawan what you need delivered')
 st.caption('Deterministic guided intake: only labeled facts are extracted. The AI provider is optional; no missing customer details are guessed.')
@@ -498,7 +499,9 @@ st.caption('EasyParcel rate lookup is optional; manual evidence remains availabl
 from carrier_adapters import EasyParcelAdapter, EasyParcelOpenApiAdapter, LalamoveAdapter
 _easy_adapter=EasyParcelAdapter()
 _lama_adapter=LalamoveAdapter()
-st.write('EasyParcel Individual API key:',_easy_adapter.connection_status(),'· Lalamove connection:',_lama_adapter.connection_status())
+st.write('EasyParcel Individual API key:',
+         'CREDENTIALS PRESENT — response not verified' if _easy_adapter.connection_status()=='CONNECTED' else 'NOT_CONNECTED',
+         '· Lalamove connection:',_lama_adapter.connection_status())
 st.caption('EasyParcel Open API OAuth: '+EasyParcelOpenApiAdapter().connection_status()+' · Account linking is disabled until users and delivery jobs have private, authenticated access.')
 from quote_guidance import request_checklist, request_details, vehicle_candidates, make_draft, collection_progress
 from mixed_method import preview as guided_preview, approve as guided_approve

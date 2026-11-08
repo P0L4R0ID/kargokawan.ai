@@ -14,11 +14,11 @@ def setup(tmp_path):
     return {'EASYPARCEL_OAUTH_PLATFORM_URL':'https://kargokawan.streamlit.app',
             'EASYPARCEL_OAUTH_CLIENT_ID':'test-client',
             'EASYPARCEL_OAUTH_CLIENT_SECRET':'test-secret',
-            'EASYPARCEL_OAUTH_REDIRECT_URI':'https://backend.example/oauth/easyparcel/callback',
+            'EASYPARCEL_OAUTH_REDIRECT_URI':'https://kargokawan-oauth.onrender.com/oauth/easyparcel/callback',
             'EASYPARCEL_OAUTH_DB':str(tmp_path/'tokens.sqlite'),
             'EASYPARCEL_OAUTH_FERNET_KEY':Fernet.generate_key().decode()}
 
-def call(app,path,query='',cookie='',host='backend.example'):
+def call(app,path,query='',cookie='',host='kargokawan-oauth.onrender.com'):
     captured={}
     def start(status,headers): captured.update(status=status,headers=dict(headers))
     body=b''.join(app({'PATH_INFO':path,'REQUEST_METHOD':'GET','QUERY_STRING':query,'HTTP_COOKIE':cookie,'HTTP_HOST':host},start)).decode()
@@ -48,7 +48,7 @@ def test_bad_redirect_and_expired_state(tmp_path):
     env=setup(tmp_path)
     env['EASYPARCEL_OAUTH_REDIRECT_URI']='http://backend.example/oauth/easyparcel/callback'
     with pytest.raises(ValueError): configuration(env)
-    env['EASYPARCEL_OAUTH_REDIRECT_URI']='https://backend.example/oauth/easyparcel/callback'
+    env['EASYPARCEL_OAUTH_REDIRECT_URI']='https://kargokawan-oauth.onrender.com/oauth/easyparcel/callback'
     clock=[100]
     app=create_app(env,lambda req: FakeResponse(),lambda:clock[0],enable_test_flow=True)
     _,headers,_=call(app,'/oauth/easyparcel/start')
@@ -72,6 +72,7 @@ def test_production_entrypoint_rejects_linking_even_with_credentials(tmp_path):
         assert status=='403 Forbidden'
         assert 'private-' not in body
         assert 'Location' not in headers
+    assert call(app,'/oauth/easyparcel/status')[0]=='404 Not Found'
     assert not (tmp_path/'tokens.sqlite').exists()
 
 def test_disconnected_open_api_adapter_has_no_side_effects():
@@ -107,3 +108,16 @@ def test_refresh_failure_does_not_leak_tokens(tmp_path):
     with pytest.raises(TimeoutError):
         refresh_token(env,'private-refresh',fail)
     assert not (tmp_path/'tokens.sqlite').exists()
+
+def test_test_flow_sessions_cannot_complete_each_others_authorization(tmp_path):
+    env=setup(tmp_path)
+    app=create_app(env,lambda req: FakeResponse(),enable_test_flow=True)
+    _,first,_=call(app,'/oauth/easyparcel/start')
+    _,second,_=call(app,'/oauth/easyparcel/start')
+    first_state=parse_qs(urlsplit(first['Location']).query)['state'][0]
+    first_cookie=first['Set-Cookie'].split(';')[0]
+    second_cookie=second['Set-Cookie'].split(';')[0]
+    assert call(app,'/oauth/easyparcel/callback',f'code=private-code&state={first_state}',second_cookie)[0]=='400 Bad Request'
+    assert get_stored_token(env['EASYPARCEL_OAUTH_DB'],env['EASYPARCEL_OAUTH_FERNET_KEY'],second_cookie.split('=',1)[1]) is None
+    assert call(app,'/oauth/easyparcel/callback',f'code=private-code&state={first_state}',first_cookie)[0]=='200 OK'
+    assert get_stored_token(env['EASYPARCEL_OAUTH_DB'],env['EASYPARCEL_OAUTH_FERNET_KEY'],first_cookie.split('=',1)[1]) is not None

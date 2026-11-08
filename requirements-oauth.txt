@@ -1,2 +1,3 @@
 cryptography>=43,<47
 gunicorn>=22,<24
+PyJWT[crypto]>=2.8,<3

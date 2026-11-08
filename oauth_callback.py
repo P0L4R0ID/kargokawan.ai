@@ -19,6 +19,7 @@ AUTHORIZE_URL = 'https://api.easyparcel.com/oauth/login'
 TOKEN_URL = 'https://api.easyparcel.com/oauth/token'
 COOKIE = 'kk_easyparcel_oauth_session'
 FRONTEND_ORIGIN = 'https://kargokawan.streamlit.app'
+BACKEND_ORIGIN = 'https://kargokawan-oauth.onrender.com'
 
 
 def configuration(env=None):
@@ -32,7 +33,8 @@ def configuration(env=None):
     parsed = parse.urlsplit(redirect)
     if env['EASYPARCEL_OAUTH_PLATFORM_URL'].rstrip('/') != FRONTEND_ORIGIN:
         raise ValueError('Platform URL does not match the verified frontend origin.')
-    if (parsed.scheme != 'https' or not parsed.hostname or parsed.port is not None
+    if (redirect != BACKEND_ORIGIN + '/oauth/easyparcel/callback'
+            or parsed.scheme != 'https' or not parsed.hostname or parsed.port is not None
             or parsed.username or parsed.password or parsed.hostname in ('localhost', '127.0.0.1')
             or parsed.hostname == parse.urlsplit(FRONTEND_ORIGIN).hostname
             or parsed.path != '/oauth/easyparcel/callback' or parsed.query or parsed.fragment):
