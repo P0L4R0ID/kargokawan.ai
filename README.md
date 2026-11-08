@@ -316,3 +316,23 @@ remain available. The progress table shows order-level courier coverage,
 complete vehicle subsets and unresolved quote requests. A quote-backed plan must
 be previewed and approved, then sent to a persistent delivery job for a second
 approval. No booking, dispatch, payment or live tracking occurs.
+
+## Simplified quote entry
+
+Open **Collect real shipping quotations** and choose an existing delivery job.
+For an EasyParcel parcel quote, choose one order; its pickup and destination
+postcodes, weight and package dimensions appear automatically. Vehicle-only
+fields stay hidden. For Lalamove, choose a possible same-region request group,
+select the covered orders and edit the ordered stop table. The app builds the
+stop JSON internally. A request candidate does not prove Lalamove serves the
+route.
+
+Enter the actual service, full MYR amount, charge treatment, transit estimate,
+conditions, evidence reference and expiry using Malaysia-local date/time
+controls. Order dimensions count as quoted eligibility only after you confirm
+the provider accepted them. Capacity and route sequence also require provider
+confirmation. Tax and surcharge treatment start as `UNKNOWN`. Select **Review
+quote draft**; the checklist shows what is missing. Correct the form and review
+again, then save the quote. Manual evidence remains `USER_IMPORTED_UNVERIFIED`.
+CSV import, the existing solver, both demos and the separate job approval gate
+remain available. No booking or live provider API call is made.

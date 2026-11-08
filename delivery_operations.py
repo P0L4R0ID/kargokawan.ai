@@ -40,6 +40,9 @@ class JobStore:
             db.execute('INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?)',(job_id,state,json.dumps(rows,default=str),'[]','[]',None,None,now,now))
             self._event(db,job_id,'user','CREATED',state)
         return job_id
+    def list_jobs(self):
+        with self._db() as db:
+            return [dict(job_id=row[0],state=row[1],updated_at=row[2]) for row in db.execute('SELECT job_id,state,updated_at FROM jobs ORDER BY updated_at DESC')]
     def get(self,job_id):
         with self._db() as db:
             row=db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone()
