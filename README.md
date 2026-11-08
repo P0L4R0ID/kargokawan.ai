@@ -336,3 +336,7 @@ quote draft**; the checklist shows what is missing. Correct the form and review
 again, then save the quote. Manual evidence remains `USER_IMPORTED_UNVERIFIED`.
 CSV import, the existing solver, both demos and the separate job approval gate
 remain available. No booking or live provider API call is made.
+
+### EasyParcel Open API OAuth readiness
+
+A separate, server-side OAuth callback prototype and deployment guide are in [docs/easyparcel_oauth_deployment.md](docs/easyparcel_oauth_deployment.md). It is not connected to the quotation UI and has not completed a live EasyParcel handshake. The existing Individual API key adapter and manual quotation workflow remain available.
