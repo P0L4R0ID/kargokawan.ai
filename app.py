@@ -3,7 +3,7 @@ import hashlib
 import pandas as pd
 import streamlit as st
 from engine import sample_orders, CITIES
-from dashboard import PROVIDERS, normalize, replan, manifest
+from dashboard import PROVIDERS, COLUMNS, normalize, replan, manifest
 from agent import run_request, approve
 from ai_provider import configuration, test_connection
 
@@ -155,3 +155,79 @@ if answer:
         right.write('Proposed — SIMULATED DATA'); right.json(proposal['after'])
         st.button('Apply proposed change', on_click=apply_assistant_change)
         st.button('Discard', on_click=discard_assistant_change)
+
+
+from quotes import template, import_quotes, validate_postcodes, preview_imported, approve_imported, imported_manifest
+st.subheader('Quotation data source')
+quote_mode = st.radio('Select price source', ['Simulated demo', 'Imported quotations'], horizontal=True)
+if quote_mode == 'Imported quotations':
+    st.warning('USER-SUPPLIED quotations are not independently authenticated. No booking or payment occurs.')
+    st.download_button('Download quotation CSV template', template(), 'quotation_template.csv', 'text/csv')
+    st.caption('Enter five-digit postcodes for each order. Sample values below are fictional demo input.')
+    demo_postcodes = {'Kuala Lumpur':'50000','George Town':'10000','Johor Bahru':'80000','Ipoh':'30000','Melaka':'75000','Kuantan':'25000','Kota Kinabalu':'88000','Sandakan':'90000','Tawau':'91000','Kuching':'93000','Miri':'98000','Sibu':'96000'}
+    real_orders = edited.copy()
+    if 'imported_orders' not in s or not s.imported_orders[COLUMNS].equals(edited[COLUMNS]):
+        s.imported_orders = edited.copy()
+        s.imported_orders['origin_postcode'] = ''
+        s.imported_orders['destination_postcode'] = ''
+        s.imported_preview = None
+        s.imported_approved = None
+    real_orders = s.imported_orders.copy()
+    if st.button('Load fictional demo postcodes'):
+        s.imported_orders['origin_postcode'] = s.imported_orders.origin.map(demo_postcodes)
+        s.imported_orders['destination_postcode'] = s.imported_orders.destination.map(demo_postcodes)
+        s.real_postcode_revision = s.get('real_postcode_revision', 0) + 1
+        real_orders = s.imported_orders.copy()
+    real_orders = st.data_editor(real_orders, key=f'real_orders_editor_{s.get("real_postcode_revision",0)}', hide_index=True, use_container_width=True)
+    if not real_orders.equals(s.imported_orders):
+        s.imported_orders = real_orders.copy()
+        s.imported_preview = None
+        s.imported_approved = None
+    quote_upload = st.file_uploader('Upload user-obtained quotation CSV', type=['csv'], key='quote_upload')
+    unavailable = st.multiselect('Unavailable quoted providers', [], key='quoted_unavailable')
+    if tuple(unavailable) != s.get('imported_unavailable', ()):
+        s.imported_unavailable = tuple(unavailable)
+        s.imported_preview = None
+        s.imported_approved = None
+    imported = None
+    upload_bytes = quote_upload.getvalue() if quote_upload is not None else None
+    if upload_bytes != s.get('imported_upload_bytes'):
+        s.imported_upload_bytes = upload_bytes
+        s.imported_preview = None
+        s.imported_approved = None
+    if quote_upload is not None:
+        try:
+            imported = import_quotes(upload_bytes)
+            st.dataframe(pd.DataFrame([{'Quote ID':q['quote_id'],'Provider':q['provider'],'Service':q['service'],'Price MYR':str(q['total_myr']),'Reference':q['source_reference'],'Retrieved':q['retrieved_at'].isoformat(),'Expires':q['valid_until'].isoformat(),'Eligible':q['eligible']} for q in imported]))
+        except ValueError as exc:
+            st.error(str(exc))
+    if st.button('Plan with imported quotations'):
+        try:
+            if imported is None: raise ValueError('Upload valid quotations first.')
+            s.imported_preview = preview_imported(real_orders, imported, unavailable)
+            s.imported_approved = None
+        except ValueError as exc:
+            s.imported_preview = None
+            st.error(str(exc))
+    if s.get('imported_preview') and imported is not None and s.imported_preview['fingerprint'] != __import__('quotes').quote_fingerprint(validate_postcodes(real_orders), imported, unavailable):
+        s.imported_preview = None
+        s.imported_approved = None
+        st.warning('Inputs changed. Generate a fresh preview.')
+    if s.get('imported_preview'):
+        proposed = s.imported_preview['plan']
+        st.info('Preview only. Review quote IDs and source references before approval.')
+        st.metric('Quoted proposal MYR', str(proposed['total_myr']))
+        st.metric('Same-source standalone baseline MYR', str(proposed['baseline_myr']) if proposed['baseline_myr'] is not None else 'UNKNOWN / NOT QUOTED')
+        st.dataframe(imported_manifest(proposed))
+        if st.button('Apply imported proposal'):
+            try:
+                if imported is None: raise ValueError('Quotations changed; generate a fresh preview.')
+                s.imported_approved = approve_imported(s.imported_preview, real_orders, imported, unavailable)
+                s.imported_preview = None
+            except ValueError as exc: st.error(str(exc))
+        if st.button('Discard imported proposal'):
+            s.imported_preview = None
+            st.info('Proposal discarded.')
+    if s.get('imported_approved'):
+        st.success('Imported quotation proposal approved for manifest export. No shipment booked.')
+        st.download_button('Export approved imported manifest', imported_manifest(s.imported_approved).to_csv(index=False), 'approved_imported_manifest.csv', 'text/csv')
