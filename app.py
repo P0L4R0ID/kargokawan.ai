@@ -6,17 +6,10 @@ from engine import sample_orders, CITIES
 from dashboard import PROVIDERS, COLUMNS, normalize, replan, manifest
 from agent import run_request, approve
 from ai_provider import configuration, test_connection
+from product_ui import STYLE
 
 st.set_page_config(page_title='KargoKawan | Operations', page_icon='📦', layout='wide')
-st.markdown("""<style>
-:root { color-scheme: light; }
-.stApp { background: #f7f8f6; color: #172b3a; }
-h1, h2, h3 { color: #173047; letter-spacing: -.015em; }
-[data-testid="stMetric"] { background: #fff; border: 1px solid #d7e2e3; border-radius: 10px; padding: 1rem; }
-[data-testid="stSidebar"] { background: #f0f5f4; }
-.stApp button:focus-visible { outline: 3px solid #0d766d; outline-offset: 2px; }
-@media (max-width: 640px) { [data-testid="stMetric"] { padding: .65rem; } }
-</style>""", unsafe_allow_html=True)
+st.markdown(STYLE, unsafe_allow_html=True)
 st.caption('KARGOKAWAN  /  Your delivery operations companion')
 st.title('KargoKawan')
 st.write('Plan deliveries, compare options and prepare the next steps in one place.')

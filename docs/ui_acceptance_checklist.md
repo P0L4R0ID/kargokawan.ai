@@ -1,6 +1,6 @@
 # Orders-first browser acceptance checklist
 
-At **1366px laptop width** and **375px phone width**, check:
+At **1366px and 1440px laptop**, **768px tablet** and **375px phone** widths, check:
 
 - [ ] Landing screen shows KargoKawan, five fictional order cards and compact demo disclosure. No recommendation, cost, saving or van assignment appears before planning.
 - [ ] Pickup and destination counts match the validated order records. The complete evidence and deadline controls are expandable and keyboard reachable.
@@ -16,3 +16,5 @@ At **1366px laptop width** and **375px phone width**, check:
 - [ ] Keyboard focus, contrast, text wrapping, card spacing and touch targets are usable at both widths.
 
 Streamlit AppTest validates state and actions, but not screen-reader output, actual keyboard focus order, touch targets or pixel-level phone layout. Those checks remain manual before deploying this branch.
+
+Local Chromium review covered Orders, Plan, Approval and Prepare at approximately 1212px window width. Managed Chrome blocked device emulation; exact breakpoint, Approval, Prepare, disruption, keyboard and screen-reader visual checks remain pending. See [product design](product_design.md).

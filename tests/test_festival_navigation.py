@@ -60,17 +60,17 @@ def test_each_stage_has_its_own_information_hierarchy():
     assert app.session_state['festival_current_plan'] is None
     assert not any(item.label == 'Suggested total · assumed' for item in app.metric)
     click(app, 'Find the best delivery plan')
-    assert app.metric[0].label == 'Suggested total · assumed'
+    assert any('<div class="kk-cost"' in item.value and 'RM 113.00' in item.value for item in app.markdown)
     choices = app.session_state['festival_current_plan']['decisions']
     assert sum(len(item['shipment_ids']) for item in choices) == 5
     assert choices and any(item['method'] == 'multi_stop_vehicle' for item in choices)
     click(app, 'Review this delivery plan')
-    assert any(item.label == 'Plan to approve · assumed' for item in app.metric)
+    assert any('<div class="kk-decision"' in item.value and 'RM 113.00' in item.value for item in app.markdown)
     assert not any(item.label == 'Suggested total · assumed' for item in app.metric)
     assert not any('preparation manifest' in item.label for item in app.get('download_button'))
     click(app, 'Approve this plan')
-    assert any(item.label == 'Approved assumed total' for item in app.metric)
-    assert not any(item.label == 'Plan to approve · assumed' for item in app.metric)
+    assert any('<div class="kk-approved"' in item.value for item in app.markdown)
+    assert not any('<div class="kk-decision"' in item.value for item in app.markdown)
     assert any('preparation manifest' in item.label for item in app.get('download_button'))
     assert app.session_state['festival_prepared'] is False
     click(app, 'Mark fictional packages prepared')
