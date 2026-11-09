@@ -20,14 +20,12 @@ h1, h2, h3 { color: #173047; letter-spacing: -.015em; }
 st.caption('KARGOKAWAN  /  Your delivery operations companion')
 st.title('KargoKawan')
 st.write('Plan deliveries, compare options and prepare the next steps in one place.')
-public_tab, private_tab, advanced_tab = st.tabs(['Five-order walkthrough', 'Private Pilot', 'Advanced & other demos'])
-with public_tab:
-    from festival_demo import render as render_festival_demo
-    render_festival_demo()
-with private_tab:
+from festival_demo import render as render_festival_demo
+render_festival_demo()
+with st.expander('Private Pilot', expanded=False):
     from pilot_ui import render as render_pilot
     render_pilot()
-with advanced_tab:
+with st.expander('Advanced & other demos', expanded=False):
     st.header('Advanced & other demos')
     st.warning('Simulation only · Fictional provider assumptions. No booking or payment.')
     for key, value in {'orders':sample_orders(), 'planner':{}, 'revision':0, 'upload_hash':None}.items():

@@ -253,6 +253,19 @@ def _go(state, stage):
     st.rerun()
 
 
+def _seed(state):
+    state.festival_orders, state.festival_quotes = load_scenario()
+    state.festival_unavailable = []
+    state.festival_preview = None
+    state.festival_approved = None
+    state.festival_prepared = False
+    state.festival_events = ['FICTIONAL INTAKE LOADED · no booking']
+    state.festival_previous_plan = None
+    state.festival_current_plan = None
+    state.festival_last_change = None
+    state.festival_view = 'Orders'
+
+
 def _groups(result, orders):
     by_id = {str(row['order_id']): row for row in orders.to_dict('records')}
     for choice in result.get('decisions', []):
@@ -286,34 +299,22 @@ def _change_note(state, result):
 
 def render():
     state = st.session_state
-    st.subheader("Let's get these deliveries sorted.")
-    st.write('Check your orders, compare a delivery plan, approve it and prepare a manifest.')
-    st.caption('Demo uses fictional orders and prices. No real bookings.')
     if state.get('festival_orders') is None:
-        st.write('Try a complete five-delivery example. No login or courier account needed.')
-        if st.button('Try with 5 example deliveries', type='primary'):
-            state.festival_orders, state.festival_quotes = load_scenario()
-            state.festival_unavailable = []
-            state.festival_preview = None
-            state.festival_approved = None
-            state.festival_prepared = False
-            state.festival_events = ['FICTIONAL INTAKE LOADED · no booking']
-            state.festival_previous_plan = None
-            state.festival_current_plan = None
-            state.festival_last_change = None
-            state.festival_view = 'Orders'
-            st.rerun()
-        return
+        _seed(state)
+    st.subheader('Your deliveries to arrange')
+    st.caption('Demo uses fictional orders and prices. No real bookings.')
     orders, quotes = state.festival_orders, state.festival_quotes
     try:
         validate_orders(orders)
     except ValueError as exc:
         st.error('Please correct the delivery details before planning: ' + str(exc))
         return
-    result = optimize(orders, quotes, state.festival_unavailable, demo=True)
-    state.festival_current_plan = result
     stage = _view(state)
     state.festival_view = stage
+    result = None
+    if stage != 'Orders':
+        result = optimize(orders, quotes, state.festival_unavailable, demo=True)
+        state.festival_current_plan = result
     stages = ('Orders', 'Plan', 'Approve', 'Prepare')
     st.progress((stages.index(stage) + 1) * 25, text=f'Step {stages.index(stage)+1} of 4 · {stage}')
     with st.expander('Earlier steps', expanded=False):
@@ -321,7 +322,9 @@ def render():
             if st.button('View ' + back.lower(), key='festival_back_'+back):
                 _go(state, back)
     if stage == 'Orders':
-        st.write(f"**Your deliveries · {len(orders)} orders from {orders.iloc[0]['origin']} {orders.iloc[0]['origin_postcode']}**")
+        st.write(f"**You have {len(orders)} deliveries to arrange**")
+        st.caption(f"Pickup: {orders.iloc[0]['origin']} {orders.iloc[0]['origin_postcode']} · "
+                   f"{orders.destination.nunique()} destination cities. Delivery groups have not been chosen yet.")
         for row in orders.to_dict('records'):
             with st.container(border=True):
                 st.write(f"**{row['destination']} · {row['destination_postcode']}**")
@@ -344,7 +347,7 @@ def render():
                     st.rerun()
                 except ValueError as exc:
                     st.error('Please correct this deadline: ' + str(exc))
-        if st.button('Review delivery plan', type='primary'):
+        if st.button('Find the best delivery plan', type='primary'):
             _go(state, 'Plan')
     elif stage == 'Plan':
         st.write('**KargoKawan’s suggested plan**')
@@ -380,7 +383,7 @@ def render():
             elif state.get('festival_approved'):
                 if st.button('Continue to preparation', type='primary'):
                     _go(state, 'Prepare')
-            elif st.button('Review this plan', type='primary'):
+            elif st.button('Review this delivery plan', type='primary'):
                 state.festival_preview = preview(orders, quotes, state.festival_unavailable, demo=True)
                 state.festival_events.append('FICTIONAL PLAN PROPOSED · no booking or payment')
                 _go(state, 'Approve')
@@ -430,6 +433,9 @@ def render():
     if stage != 'Orders':
         st.caption('Demo uses fictional orders and prices. No real bookings.')
     with st.expander('Something changed? · Demo controls and activity'):
+        if st.button('Reset demo to orders'):
+            _seed(state)
+            st.rerun()
         if VAN not in state.festival_unavailable:
             if st.button('Simulate van unavailable'):
                 state.festival_unavailable = [VAN]

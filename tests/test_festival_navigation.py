@@ -10,16 +10,21 @@ def click(app, label):
 
 def test_guided_journey_and_backward_navigation():
     app = AppTest.from_file('../app.py', default_timeout=30).run()
-    assert [tab.label for tab in app.tabs] == ['Five-order walkthrough', 'Private Pilot', 'Advanced & other demos']
+    assert len(app.session_state['festival_orders']) == 5
+    assert app.session_state['festival_current_plan'] is None
+    assert not any('Suggested total · assumed' == item.label for item in app.metric)
     assert not any(tab.label == 'Overview' for tab in app.tabs)
-    click(app, 'Try with 5 example deliveries')
     assert app.session_state['festival_view'] == 'Orders'
-    click(app, 'Review delivery plan')
+    original_events = list(app.session_state['festival_events'])
+    app.run()
+    assert app.session_state['festival_events'] == original_events
+    assert app.session_state['festival_current_plan'] is None
+    click(app, 'Find the best delivery plan')
     assert app.session_state['festival_current_plan']['total_myr'] == Decimal('113.00')
     click(app, 'View orders')
     assert app.session_state['festival_view'] == 'Orders'
-    click(app, 'Review delivery plan')
-    click(app, 'Review this plan')
+    click(app, 'Find the best delivery plan')
+    click(app, 'Review this delivery plan')
     assert app.session_state['festival_view'] == 'Approve'
     assert not any('fictional preparation manifest' in item.label for item in app.get('download_button'))
     click(app, 'Approve this plan')
@@ -32,11 +37,14 @@ def test_guided_journey_and_backward_navigation():
     assert app.session_state['festival_view'] == 'Plan'
     assert app.session_state['festival_approved'] is None
     assert app.session_state['festival_current_plan']['total_myr'] == Decimal('132.00')
+    click(app, 'Reset demo to orders')
+    assert app.session_state['festival_view'] == 'Orders'
+    assert app.session_state['festival_current_plan'] is None
+    assert app.session_state['festival_approved'] is None
 
 
 def test_blocked_deadline_requires_correction():
     app = AppTest.from_file('../app.py', default_timeout=30).run()
-    click(app, 'Try with 5 example deliveries')
     next(item for item in app.selectbox if item.label == 'Fictional order to adjust deadline').set_value('FEST004').run()
     next(item for item in app.number_input if item.label == 'Revised fictional deadline (days)').set_value(1).run()
     click(app, 'Apply fictional deadline change')

@@ -86,12 +86,11 @@ def _click(app, label):
 def test_festival_ui_complete_flow_and_session_isolation():
     with patch('pilot_client.call_pilot', side_effect=AssertionError('private pilot API must not be called')):
         app = AppTest.from_file('../app.py', default_timeout=30).run()
-        _click(app, 'Try with 5 example deliveries')
         assert len(app.session_state['festival_orders']) == 5
         assert app.session_state['festival_view'] == 'Orders'
-        _click(app, 'Review delivery plan')
+        _click(app, 'Find the best delivery plan')
         assert app.session_state['festival_view'] == 'Plan'
-        _click(app, 'Review this plan')
+        _click(app, 'Review this delivery plan')
         assert app.session_state['festival_preview'] is not None
         assert app.session_state['festival_view'] == 'Approve'
         assert not app.get('download_button') or not any('fictional preparation manifest' in b.label for b in app.get('download_button'))
@@ -105,14 +104,13 @@ def test_festival_ui_complete_flow_and_session_isolation():
         assert app.session_state['festival_approved'] is None
         assert app.session_state['festival_view'] == 'Plan'
         assert app.session_state['festival_current_plan']['total_myr'] == Decimal('132.00')
-        _click(app, 'Review this plan')
+        _click(app, 'Review this delivery plan')
         _click(app, 'Approve this plan')
         assert app.session_state['festival_approved']['total_myr'] == Decimal('132.00')
 
 
 def test_festival_ui_impossible_deadline_blocks_approval():
     app = AppTest.from_file('../app.py', default_timeout=30).run()
-    _click(app, 'Try with 5 example deliveries')
     next(box for box in app.selectbox if box.label == 'Fictional order to adjust deadline').set_value('FEST004').run()
     next(item for item in app.number_input if item.label == 'Revised fictional deadline (days)').set_value(1).run()
     _click(app, 'Apply fictional deadline change')
@@ -173,15 +171,14 @@ def test_assistant_blocked_and_missing_baseline_make_no_savings_claim():
 
 def test_assistant_ui_history_tracks_only_actual_actions():
     app = AppTest.from_file('../app.py', default_timeout=30).run()
-    _click(app, 'Try with 5 example deliveries')
     assert app.session_state['festival_events'] == ['FICTIONAL INTAKE LOADED · no booking']
-    _click(app, 'Review delivery plan')
-    _click(app, 'Review this plan')
+    _click(app, 'Find the best delivery plan')
+    _click(app, 'Review this delivery plan')
     assert app.session_state['festival_events'][-1].startswith('FICTIONAL PLAN PROPOSED')
     _click(app, 'Change plan')
     assert app.session_state['festival_approved'] is None
     assert app.session_state['festival_events'][-1].startswith('FICTIONAL PROPOSAL DISCARDED')
-    _click(app, 'Review this plan')
+    _click(app, 'Review this delivery plan')
     _click(app, 'Approve this plan')
     assert app.session_state['festival_events'][-1].startswith('HUMAN APPROVED')
     _click(app, 'Simulate van unavailable')
