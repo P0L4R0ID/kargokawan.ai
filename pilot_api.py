@@ -17,6 +17,12 @@ RECORD_ID = r'[A-Za-z0-9-]{1,80}'
 JOB_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')$')
 QUOTES_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/quotes$')
 QUOTE_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/quotes/(' + RECORD_ID + r')$')
+AVAILABILITY_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/availability$')
+PROPOSALS_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/proposals$')
+PROPOSAL_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/proposals/(' + RECORD_ID + r')$')
+APPROVAL_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/proposals/(' + RECORD_ID + r')/approval$')
+MANIFEST_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/proposals/(' + RECORD_ID + r')/manifest$')
+AUDIT_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/audit$')
 ORDER_FIELDS = {'order_id','origin','destination','weight_kg','length_cm','width_cm','height_cm',
                 'deadline_days','recipient','origin_postcode','destination_postcode'}
 QUOTE_FIELDS = set('quote_id source_class provider service transport_method origin_postcode destination_postcode pickup_location dropoff_locations shipment_ids physical_weight_kg length_cm width_cm height_cm capacity_kg displayed_cost_myr full_cost tax_status surcharge_status source_reference collected_at valid_until transit_days restrictions'.split())
@@ -172,6 +178,45 @@ def handle(environ,start_response,store):
                 if set(body)!={'orders'}: raise ValueError('Only orders may be supplied.')
                 job_id=store.create_job(token,_orders(body['orders']),idempotency_key=key)
                 return _response(start_response,'201 Created',{'job_id':job_id,'version':store.job_snapshot(token,job_id)['version']})
+        if any(pattern.fullmatch(route) for pattern in
+               (AVAILABILITY_PATH,PROPOSALS_PATH,PROPOSAL_PATH,APPROVAL_PATH,MANIFEST_PATH,AUDIT_PATH)):
+            if not hasattr(store, 'create_proposal'):
+                return _response(start_response,'503 Service Unavailable',{'status':'STORAGE_UNAVAILABLE',
+                    'reason':'Private planning requires the PostgreSQL pilot store.'})
+        availability=AVAILABILITY_PATH.fullmatch(route)
+        if availability:
+            job_id=availability[1]
+            if method=='GET':
+                return _response(start_response,'200 OK',{'unavailable':store.availability(token,job_id)})
+            if method=='PUT':
+                version=_version(environ);body=_body(environ)
+                if set(body)!={'unavailable'}: raise ValueError('Only unavailable providers may be supplied.')
+                return _response(start_response,'200 OK',store.set_availability(token,job_id,body['unavailable'],version))
+        proposals=PROPOSALS_PATH.fullmatch(route)
+        if proposals:
+            job_id=proposals[1]
+            if method=='GET':
+                return _response(start_response,'200 OK',{'proposals':store.list_proposals(token,job_id)})
+            if method=='POST':
+                key=_mutation_key(environ);body=_body(environ)
+                if body: raise ValueError('Plan requests must not supply client-side prices or orders.')
+                result=store.create_proposal(token,job_id,idempotency_key=key)
+                return _response(start_response,'200 OK' if result['status']=='NOT READY' else '201 Created',result)
+        proposal=PROPOSAL_PATH.fullmatch(route)
+        if proposal and method=='GET':
+            return _response(start_response,'200 OK',store.proposal_snapshot(token,proposal[1],proposal[2]))
+        approval=APPROVAL_PATH.fullmatch(route)
+        if approval and method=='PUT':
+            version=_version(environ);body=_body(environ)
+            if body: raise ValueError('Approval accepts no client-side plan changes.')
+            return _response(start_response,'200 OK',store.approve_proposal(token,approval[1],approval[2],version))
+        manifest=MANIFEST_PATH.fullmatch(route)
+        if manifest and method=='GET':
+            return _response(start_response,'200 OK',{'filename':'pilot_manifest_'+manifest[2]+'.csv',
+                'csv':store.approved_manifest(token,manifest[1],manifest[2])})
+        audit=AUDIT_PATH.fullmatch(route)
+        if audit and method=='GET':
+            return _response(start_response,'200 OK',{'events':store.audit_events(token,audit[1])})
         job=JOB_PATH.fullmatch(route)
         if job:
             job_id=job[1]
@@ -206,7 +251,7 @@ def handle(environ,start_response,store):
     except PermissionError:
         return _response(start_response,'404 Not Found',{'error':'Record unavailable.'})
     except ValueError as exc:
-        return _response(start_response,'409 Conflict' if 'changed' in str(exc) or 'reused' in str(exc) else '400 Bad Request',
+        return _response(start_response,'409 Conflict' if any(word in str(exc) for word in ('changed','reused','outdated','eligibility')) else '400 Bad Request',
                          {'error':str(exc)})
     except (sqlite3.Error, psycopg.Error, PoolTimeout):
         return _response(start_response,'503 Service Unavailable',{'status':'STORAGE_UNAVAILABLE',

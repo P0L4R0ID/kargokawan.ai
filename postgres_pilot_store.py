@@ -8,6 +8,7 @@ import json
 import uuid
 
 from psycopg_pool import ConnectionPool
+from pilot_planning import evaluate as evaluate_plan, fingerprint as plan_fingerprint, manifest_csv
 
 PILOT_SCHEMA = 'kargokawan_pilot'
 
@@ -40,10 +41,28 @@ class PostgresPilotStore:
                         owner_sub TEXT NOT NULL, request_key TEXT NOT NULL,
                         request_hash TEXT NOT NULL, response_id TEXT NOT NULL,
                         PRIMARY KEY(owner_sub, request_key))''')
-                    db.execute('INSERT INTO pilot_schema_versions (version) VALUES (1) ON CONFLICT DO NOTHING')
                     versions = db.execute('SELECT version FROM pilot_schema_versions').fetchall()
-                    if versions != [(1,)]:
+                    if not versions:
+                        db.execute('INSERT INTO pilot_schema_versions (version) VALUES (1)')
+                        versions = [(1,)]
+                    if versions not in ([(1,)], [(2,)]):
                         raise RuntimeError('Unsupported pilot storage schema version.')
+                    db.execute("ALTER TABLE pilot_jobs ADD COLUMN IF NOT EXISTS unavailable_json TEXT NOT NULL DEFAULT '[]'")
+                    db.execute('''CREATE TABLE IF NOT EXISTS pilot_proposals (
+                        proposal_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES pilot_jobs(job_id),
+                        owner_sub TEXT NOT NULL, input_fingerprint TEXT NOT NULL,
+                        result_json TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now())''')
+                    db.execute('''CREATE TABLE IF NOT EXISTS pilot_audit (
+                        event_id BIGSERIAL PRIMARY KEY, job_id TEXT NOT NULL REFERENCES pilot_jobs(job_id),
+                        owner_sub TEXT NOT NULL, action TEXT NOT NULL, detail_json TEXT NOT NULL,
+                        occurred_at TIMESTAMPTZ NOT NULL DEFAULT now())''')
+                    if versions == [(1,)]:
+                        db.execute('''CREATE FUNCTION pilot_audit_no_change() RETURNS trigger LANGUAGE plpgsql AS
+                            $$ BEGIN RAISE EXCEPTION 'Pilot audit events are immutable'; END $$''')
+                        db.execute('''CREATE TRIGGER pilot_audit_no_change BEFORE UPDATE OR DELETE ON pilot_audit
+                            FOR EACH ROW EXECUTE FUNCTION pilot_audit_no_change()''')
+                        db.execute('UPDATE pilot_schema_versions SET version=2 WHERE version=1')
         except Exception:
             self.pool.close()
             raise
@@ -204,3 +223,154 @@ class PostgresPilotStore:
                 if deleted is None:
                     raise PermissionError('Quote unavailable.')
                 db.execute('DELETE FROM pilot_requests WHERE owner_sub=%s AND response_id=%s', (owner, quote_id))
+
+    @staticmethod
+    def _plan_inputs(db, owner, job_id, lock=False):
+        lock_sql = ' FOR UPDATE' if lock else ''
+        row = db.execute('''SELECT orders_json,version,unavailable_json FROM pilot_jobs
+                            WHERE job_id=%s AND owner_sub=%s''' + lock_sql, (job_id, owner)).fetchone()
+        if row is None:
+            raise PermissionError('Job unavailable.')
+        quotes = db.execute('''SELECT quote_id,quote_json,version FROM pilot_quotes
+                               WHERE job_id=%s AND owner_sub=%s ORDER BY quote_id''',
+                            (job_id, owner)).fetchall()
+        return row, quotes
+
+    def set_availability(self, identity_token, job_id, unavailable, expected_version):
+        owner = self.verifier.verify(identity_token)
+        if (not isinstance(unavailable, list) or len(unavailable) > 50 or
+                any(not isinstance(name, str) or not name.strip() or len(name) > 120 for name in unavailable) or
+                len(set(unavailable)) != len(unavailable)):
+            raise ValueError('Unavailable providers must be a unique list of provider names.')
+        with self.pool.connection() as db:
+            with db.transaction():
+                (orders_json, version, previous), _ = self._plan_inputs(db, owner, job_id, lock=True)
+                if version != expected_version:
+                    raise ValueError('Job changed; reload before updating availability.')
+                value = json.dumps(sorted(unavailable), separators=(',', ':'))
+                if value != previous:
+                    db.execute('''UPDATE pilot_jobs SET unavailable_json=%s,version=version+1
+                                  WHERE job_id=%s AND owner_sub=%s''', (value, job_id, owner))
+                    db.execute('''INSERT INTO pilot_audit (job_id,owner_sub,action,detail_json)
+                                  VALUES (%s,%s,%s,%s)''',
+                               (job_id, owner, 'AVAILABILITY_CHANGED', json.dumps({'unavailable': sorted(unavailable)})))
+        return self.job_snapshot(identity_token, job_id)
+
+    def availability(self, identity_token, job_id):
+        owner = self.verifier.verify(identity_token)
+        with self.pool.connection() as db:
+            row, _ = self._plan_inputs(db, owner, job_id)
+        return json.loads(row[2])
+
+    def create_proposal(self, identity_token, job_id, idempotency_key=None):
+        owner = self.verifier.verify(identity_token)
+        with self.pool.connection() as db:
+            with db.transaction():
+                (orders_json, version, unavailable_json), quote_rows = self._plan_inputs(db, owner, job_id, lock=True)
+                current = plan_fingerprint(orders_json, quote_rows, unavailable_json, version)
+                key = 'proposal:' + idempotency_key if idempotency_key else None
+                prior = self._prior_request(db, owner, key, job_id + current)
+                if prior:
+                    existing = db.execute('''SELECT result_json,status,version,created_at FROM pilot_proposals
+                                             WHERE proposal_id=%s AND job_id=%s AND owner_sub=%s''',
+                                          (prior, job_id, owner)).fetchone()
+                    if existing is None:
+                        raise ValueError('Proposal changed; create a fresh proposal.')
+                    return {'proposal_id': prior, 'approval_status': existing[1],
+                            'version': existing[2], 'created_at': existing[3].isoformat(),
+                            **json.loads(existing[0])}
+                result = evaluate_plan(orders_json, quote_rows, unavailable_json)
+                if result['status'] == 'NOT READY':
+                    return result
+                proposal_id = 'PPLAN-' + uuid.uuid4().hex.upper()
+                db.execute('''INSERT INTO pilot_proposals
+                              (proposal_id,job_id,owner_sub,input_fingerprint,result_json,status)
+                              VALUES (%s,%s,%s,%s,%s,%s)''',
+                           (proposal_id, job_id, owner, current, self._payload(result), 'PROPOSED'))
+                self._record_request(db, owner, key, job_id + current, proposal_id)
+                db.execute('''INSERT INTO pilot_audit (job_id,owner_sub,action,detail_json)
+                              VALUES (%s,%s,%s,%s)''',
+                           (job_id, owner, 'PLAN_PROPOSED', self._payload({
+                               'proposal_id': proposal_id, 'quote_ids': [d['quote_id'] for d in result['decisions']],
+                               'total_myr': result['total_myr'], 'booking': False})))
+                return {'proposal_id': proposal_id, 'version': 1, 'approval_status': 'PROPOSED', **result}
+
+    def list_proposals(self, identity_token, job_id):
+        owner = self.verifier.verify(identity_token)
+        with self.pool.connection() as db:
+            self._plan_inputs(db, owner, job_id)
+            rows = db.execute('''SELECT proposal_id,status,version,created_at FROM pilot_proposals
+                                 WHERE job_id=%s AND owner_sub=%s ORDER BY created_at DESC,proposal_id DESC''',
+                              (job_id, owner)).fetchall()
+        return [{'proposal_id': row[0], 'approval_status': row[1], 'version': row[2],
+                 'created_at': row[3].isoformat()} for row in rows]
+
+    def proposal_snapshot(self, identity_token, job_id, proposal_id):
+        owner = self.verifier.verify(identity_token)
+        with self.pool.connection() as db:
+            row = db.execute('''SELECT p.result_json,p.status,p.version,p.created_at FROM pilot_proposals p
+                                JOIN pilot_jobs j ON j.job_id=p.job_id AND j.owner_sub=p.owner_sub
+                                WHERE p.proposal_id=%s AND p.job_id=%s AND p.owner_sub=%s''',
+                             (proposal_id, job_id, owner)).fetchone()
+        if row is None:
+            raise PermissionError('Proposal unavailable.')
+        return {'proposal_id': proposal_id, 'approval_status': row[1], 'version': row[2],
+                'created_at': row[3].isoformat(), **json.loads(row[0])}
+
+    def approve_proposal(self, identity_token, job_id, proposal_id, expected_version):
+        owner = self.verifier.verify(identity_token)
+        with self.pool.connection() as db:
+            with db.transaction():
+                (orders_json, version, unavailable_json), quote_rows = self._plan_inputs(db, owner, job_id, lock=True)
+                row = db.execute('''SELECT input_fingerprint,result_json,status,version FROM pilot_proposals
+                                    WHERE proposal_id=%s AND job_id=%s AND owner_sub=%s FOR UPDATE''',
+                                 (proposal_id, job_id, owner)).fetchone()
+                if row is None:
+                    raise PermissionError('Proposal unavailable.')
+                old_hash, old_result, status, proposal_version = row
+                if status != 'PROPOSED' or proposal_version != expected_version:
+                    raise ValueError('Proposal changed or already approved; reload before approval.')
+                current_hash = plan_fingerprint(orders_json, quote_rows, unavailable_json, version)
+                if current_hash != old_hash:
+                    raise ValueError('Inputs changed; create a fresh proposal.')
+                current = evaluate_plan(orders_json, quote_rows, unavailable_json)
+                if current['status'] == 'NOT READY' or self._payload(current) != old_result:
+                    raise ValueError('Quotation eligibility changed; create a fresh proposal.')
+                db.execute('''UPDATE pilot_proposals SET status='APPROVED',version=version+1
+                              WHERE proposal_id=%s AND job_id=%s AND owner_sub=%s''',
+                           (proposal_id, job_id, owner))
+                db.execute('''INSERT INTO pilot_audit (job_id,owner_sub,action,detail_json)
+                              VALUES (%s,%s,%s,%s)''',
+                           (job_id, owner, 'PLAN_APPROVED', self._payload({
+                               'proposal_id': proposal_id, 'quote_ids': [d['quote_id'] for d in current['decisions']],
+                               'total_myr': current['total_myr'], 'booking': False})))
+        return self.proposal_snapshot(identity_token, job_id, proposal_id)
+
+    def approved_manifest(self, identity_token, job_id, proposal_id):
+        owner = self.verifier.verify(identity_token)
+        with self.pool.connection() as db:
+            with db.transaction():
+                (orders_json, version, unavailable_json), quote_rows = self._plan_inputs(db, owner, job_id, lock=True)
+                row = db.execute('''SELECT input_fingerprint,result_json,status FROM pilot_proposals
+                                    WHERE proposal_id=%s AND job_id=%s AND owner_sub=%s''',
+                                 (proposal_id, job_id, owner)).fetchone()
+                if row is None:
+                    raise PermissionError('Proposal unavailable.')
+                if row[2] != 'APPROVED':
+                    raise ValueError('Approve the proposal before exporting a manifest.')
+                if plan_fingerprint(orders_json, quote_rows, unavailable_json, version) != row[0]:
+                    raise ValueError('Inputs changed; approved manifest is outdated.')
+                current = evaluate_plan(orders_json, quote_rows, unavailable_json)
+                if current['status'] == 'NOT READY' or self._payload(current) != row[1]:
+                    raise ValueError('Quotation eligibility changed; approved manifest is outdated.')
+        return manifest_csv(job_id, json.loads(orders_json), current)
+
+    def audit_events(self, identity_token, job_id):
+        owner = self.verifier.verify(identity_token)
+        with self.pool.connection() as db:
+            self._plan_inputs(db, owner, job_id)
+            rows = db.execute('''SELECT event_id,action,detail_json,occurred_at FROM pilot_audit
+                                 WHERE job_id=%s AND owner_sub=%s ORDER BY event_id''',
+                              (job_id, owner)).fetchall()
+        return [{'event_id': row[0], 'action': row[1], 'detail': json.loads(row[2]),
+                 'occurred_at': row[3].isoformat()} for row in rows]

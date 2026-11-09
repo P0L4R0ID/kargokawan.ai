@@ -352,3 +352,7 @@ The reported Render backend is `https://kargokawan-oauth.onrender.com`; its regi
 ### Authenticated pilot drafts
 
 The optional OIDC-backed pilot section sends the signed operator ID token from server-side Streamlit to Render for independent verification. It supports owner-scoped draft jobs and unverified quotation records only when an explicit persistent backend and pilot settings are configured. Supabase PostgreSQL is an optional backend; see [docs/supabase_pilot_setup.md](docs/supabase_pilot_setup.md). EasyParcel OAuth and live quotation retrieval remain disabled. See [docs/pilot_auth_integration.md](docs/pilot_auth_integration.md) for exact setup and release blockers.
+
+### Authenticated pilot planning (optional branch)
+
+The private OIDC-backed pilot can create a reviewable mixed-method proposal from its own stored jobs and user-supplied quotation drafts, reject stale approval, and export an approved **NOT A BOOKING** manifest. It never promotes public-reference or synthetic quotes into a real plan. See [docs/pilot_planning_integration.md](docs/pilot_planning_integration.md) for the operator walkthrough, private API and deployment limits.

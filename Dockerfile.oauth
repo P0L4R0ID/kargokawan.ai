@@ -1,14 +1,12 @@
 # syntax=docker/dockerfile:1
 FROM python:3.12-slim
 WORKDIR /app
-COPY requirements-oauth.txt .
+COPY requirements-oauth.txt oauth_callback.py pilot_store.py postgres_pilot_store.py pilot_api.py pilot_planning.py mixed_method.py focused_quotes.py hybrid_quotes.py ./
 RUN --mount=type=secret,id=proxy_ca,required=false \
     if [ -s /run/secrets/proxy_ca ]; then \
       PIP_CERT=/run/secrets/proxy_ca pip install --no-cache-dir -r requirements-oauth.txt; \
     else \
       pip install --no-cache-dir -r requirements-oauth.txt; \
     fi
-COPY oauth_callback.py .
-COPY pilot_store.py postgres_pilot_store.py pilot_api.py .
 ENV PORT=8080
 CMD ["sh", "-c", "umask 077 && exec gunicorn --bind 0.0.0.0:${PORT} --workers 1 oauth_callback:application"]

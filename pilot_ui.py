@@ -110,3 +110,69 @@ def render():
                         if saved['status']=='OK': st.success('Quote draft updated. Reload to review current evidence.')
                         else: st.error(saved['reason'])
                     except ValueError: st.error('Enter valid JSON quotation evidence.')
+
+    st.subheader('Private quote-backed planning')
+    st.caption('Manual evidence remains USER_IMPORTED_UNVERIFIED. A proposal is not a booking or payment.')
+    availability=call_pilot(id_token,'GET','/pilot/jobs/'+job_id+'/availability')
+    if availability['status']!='OK':
+        st.warning(availability.get('reason','Provider availability is unavailable.'))
+        return
+    providers=[]
+    if quote_ids['status']=='OK':
+        for candidate in quote_ids['data']['quote_ids']:
+            record=call_pilot(id_token,'GET','/pilot/jobs/'+job_id+'/quotes/'+candidate)
+            if record['status']=='OK' and record['data']['quote'].get('provider'):
+                providers.append(record['data']['quote']['provider'])
+    known=sorted(set(providers)|set(availability['data']['unavailable']))
+    unavailable=st.multiselect('Unavailable quoted providers',known,
+                               default=availability['data']['unavailable'],key='pilot_unavailable_'+job_id)
+    if st.button('Save provider availability',key='pilot_availability_save_'+job_id):
+        saved=call_pilot(id_token,'PUT','/pilot/jobs/'+job_id+'/availability',
+                         {'unavailable':unavailable},version=job['data']['version'])
+        if saved['status']=='OK': st.success('Availability saved. Reload before requesting a plan.')
+        else: st.error(saved['reason'])
+    if st.button('Request private plan',key='pilot_plan_request_'+job_id):
+        requested=call_pilot(id_token,'POST','/pilot/jobs/'+job_id+'/proposals',{},
+                             request_key=secrets.token_urlsafe(24))
+        if requested['status']=='OK':
+            result=requested['data']
+            if result['status']=='NOT READY':
+                st.warning('NOT READY — '+result['reason'])
+                for task in result['missing_tasks']: st.write('• '+task)
+                if result.get('reviewed'): st.dataframe(result['reviewed'],hide_index=True)
+            else:
+                st.success('Reviewable private proposal created. Select it below before approval.')
+        else: st.error(requested['reason'])
+    listing=call_pilot(id_token,'GET','/pilot/jobs/'+job_id+'/proposals')
+    if listing['status']!='OK':
+        st.warning(listing.get('reason','Proposals unavailable.'))
+        return
+    if listing['data']['proposals']:
+        proposal_id=st.selectbox('Review private plan proposal',
+                                 [item['proposal_id'] for item in listing['data']['proposals']],
+                                 key='pilot_proposal_'+job_id)
+        detail=call_pilot(id_token,'GET','/pilot/jobs/'+job_id+'/proposals/'+proposal_id)
+        if detail['status']=='OK':
+            plan=detail['data']
+            st.write('Proposal status: '+plan['approval_status']+' · Solver: '+plan['status'])
+            st.write('Total MYR: '+plan['total_myr']+' · All-courier baseline: '+str(plan['baseline_myr'] or 'NOT AVAILABLE'))
+            st.caption(plan['provenance']+' · NOT A BOOKING')
+            st.dataframe(plan['decisions'],hide_index=True)
+            with st.expander('Quote review and exclusions'):
+                st.dataframe(plan['reviewed'],hide_index=True)
+            if plan['approval_status']=='PROPOSED' and st.button('Approve this private plan',key='pilot_approve_'+proposal_id):
+                approved=call_pilot(id_token,'PUT','/pilot/jobs/'+job_id+'/proposals/'+proposal_id+'/approval',
+                                    {},version=plan['version'])
+                if approved['status']=='OK': st.success('Plan approved. Reload to download its NOT A BOOKING manifest.')
+                else: st.error(approved['reason'])
+            if plan['approval_status']=='APPROVED':
+                manifest=call_pilot(id_token,'GET','/pilot/jobs/'+job_id+'/proposals/'+proposal_id+'/manifest')
+                if manifest['status']=='OK':
+                    st.download_button('Download approved manifest — NOT A BOOKING',
+                                       manifest['data']['csv'],file_name=manifest['data']['filename'],
+                                       mime='text/csv',key='pilot_manifest_'+proposal_id)
+                else: st.warning('Manifest unavailable: '+manifest['reason'])
+    with st.expander('Private planning audit history'):
+        audit=call_pilot(id_token,'GET','/pilot/jobs/'+job_id+'/audit')
+        if audit['status']=='OK': st.dataframe(audit['data']['events'],hide_index=True)
+        else: st.warning(audit['reason'])
