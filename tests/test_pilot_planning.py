@@ -183,6 +183,10 @@ def test_pilot_planning_ui_with_injected_authenticated_backend():
         if path == '/pilot/jobs/PILOT-TEST': return {'status': 'OK', 'data': {'orders': ORDERS, 'version': 1}}
         if path.endswith('/quotes'): return {'status': 'OK', 'data': {'quote_ids': []}}
         if path.endswith('/availability'): return {'status': 'OK', 'data': {'unavailable': []}}
+        if path.endswith('/easyparcel/readiness'):
+            return {'status': 'OK', 'data': {'connector': {'status': 'NOT_CONNECTED', 'reason': 'Disabled.'},
+                    'missing_quote_tasks': [{'order_id': 'A', 'action': 'Obtain a quote.'}],
+                    'manual_quote_previews': []}}
         if path.endswith('/proposals') and method == 'GET': return {'status': 'OK', 'data': {'proposals': []}}
         if path.endswith('/proposals') and method == 'POST':
             return {'status': 'OK', 'data': {'status': 'NOT READY', 'reason': 'No complete quote cover.',
@@ -197,6 +201,9 @@ def test_pilot_planning_ui_with_injected_authenticated_backend():
         assert not app.exception
         assert any('NOT READY' in warning.value for warning in app.warning)
         assert any('Collect a quote for A.' in item.value for item in app.markdown)
+        next(button for button in app.button if button.label == 'Preview synthetic EasyParcel fixture').click().run()
+        assert not app.exception
+        assert any('TEST_ONLY' in str(frame.value) for frame in app.dataframe)
 
 
 def test_migrates_existing_private_job_schema(identity):

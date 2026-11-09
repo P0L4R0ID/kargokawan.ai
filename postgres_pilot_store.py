@@ -9,6 +9,7 @@ import uuid
 
 from psycopg_pool import ConnectionPool
 from pilot_planning import evaluate as evaluate_plan, fingerprint as plan_fingerprint, manifest_csv
+from easyparcel_quote_connector import manual_quote_readiness
 
 PILOT_SCHEMA = 'kargokawan_pilot'
 
@@ -261,6 +262,13 @@ class PostgresPilotStore:
         with self.pool.connection() as db:
             row, _ = self._plan_inputs(db, owner, job_id)
         return json.loads(row[2])
+
+    def easyparcel_readiness(self, identity_token, job_id):
+        owner = self.verifier.verify(identity_token)
+        with self.pool.connection() as db:
+            (orders_json, _version, unavailable_json), quote_rows = self._plan_inputs(db, owner, job_id)
+        return manual_quote_readiness(job_id, json.loads(orders_json), quote_rows,
+                                      json.loads(unavailable_json))
 
     def create_proposal(self, identity_token, job_id, idempotency_key=None):
         owner = self.verifier.verify(identity_token)

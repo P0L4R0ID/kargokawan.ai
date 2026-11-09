@@ -111,6 +111,33 @@ def render():
                         else: st.error(saved['reason'])
                     except ValueError: st.error('Enter valid JSON quotation evidence.')
 
+    st.subheader('EasyParcel quotation readiness')
+    readiness=call_pilot(id_token,'GET','/pilot/jobs/'+job_id+'/easyparcel/readiness')
+    if readiness['status']=='OK':
+        evidence=readiness['data']
+        connector=evidence['connector']
+        st.info('EasyParcel Open API: '+connector['status']+' · '+connector['reason'])
+        st.caption('Credentials are not used here. Saved manual quotes remain USER_IMPORTED_UNVERIFIED; no carrier request occurred.')
+        if evidence['missing_quote_tasks']:
+            st.write('Missing complete courier quotations')
+            st.dataframe(evidence['missing_quote_tasks'],hide_index=True)
+        if evidence['manual_quote_previews']:
+            st.write('Saved EasyParcel evidence and review reasons')
+            st.dataframe(evidence['manual_quote_previews'],hide_index=True)
+        with st.expander('Preview a TEST_ONLY synthetic rate response'):
+            st.warning('TEST_ONLY / SYNTHETIC — not an EasyParcel price, not saved, and never eligible for real planning.')
+            chosen=st.selectbox('Fictional order for the test fixture',
+                                [str(item['order_id']) for item in job['data']['orders']],
+                                key='pilot_fixture_order_'+job_id)
+            if st.button('Preview synthetic EasyParcel fixture',key='pilot_fixture_button_'+job_id):
+                from easyparcel_quote_connector import FixtureEasyParcelQuoteAdapter, synthetic_demo_transport
+                order=next(item for item in job['data']['orders'] if str(item['order_id'])==chosen)
+                fixture=FixtureEasyParcelQuoteAdapter(synthetic_demo_transport).request_rates([order])
+                if fixture['observations']: st.dataframe(fixture['observations'],hide_index=True)
+                if fixture['rejections']: st.dataframe(fixture['rejections'],hide_index=True)
+    else:
+        st.warning('EasyParcel readiness unavailable: '+readiness.get('reason','Private backend is unavailable.'))
+
     st.subheader('Private quote-backed planning')
     st.caption('Manual evidence remains USER_IMPORTED_UNVERIFIED. A proposal is not a booking or payment.')
     availability=call_pilot(id_token,'GET','/pilot/jobs/'+job_id+'/availability')

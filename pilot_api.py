@@ -23,6 +23,7 @@ PROPOSAL_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/proposals/(' + RE
 APPROVAL_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/proposals/(' + RECORD_ID + r')/approval$')
 MANIFEST_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/proposals/(' + RECORD_ID + r')/manifest$')
 AUDIT_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/audit$')
+EASYPARCEL_READINESS_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/easyparcel/readiness$')
 ORDER_FIELDS = {'order_id','origin','destination','weight_kg','length_cm','width_cm','height_cm',
                 'deadline_days','recipient','origin_postcode','destination_postcode'}
 QUOTE_FIELDS = set('quote_id source_class provider service transport_method origin_postcode destination_postcode pickup_location dropoff_locations shipment_ids physical_weight_kg length_cm width_cm height_cm capacity_kg displayed_cost_myr full_cost tax_status surcharge_status source_reference collected_at valid_until transit_days restrictions'.split())
@@ -179,11 +180,14 @@ def handle(environ,start_response,store):
                 job_id=store.create_job(token,_orders(body['orders']),idempotency_key=key)
                 return _response(start_response,'201 Created',{'job_id':job_id,'version':store.job_snapshot(token,job_id)['version']})
         if any(pattern.fullmatch(route) for pattern in
-               (AVAILABILITY_PATH,PROPOSALS_PATH,PROPOSAL_PATH,APPROVAL_PATH,MANIFEST_PATH,AUDIT_PATH)):
+               (AVAILABILITY_PATH,PROPOSALS_PATH,PROPOSAL_PATH,APPROVAL_PATH,MANIFEST_PATH,AUDIT_PATH,EASYPARCEL_READINESS_PATH)):
             if not hasattr(store, 'create_proposal'):
                 return _response(start_response,'503 Service Unavailable',{'status':'STORAGE_UNAVAILABLE',
                     'reason':'Private planning requires the PostgreSQL pilot store.'})
         availability=AVAILABILITY_PATH.fullmatch(route)
+        connector=EASYPARCEL_READINESS_PATH.fullmatch(route)
+        if connector and method=='GET':
+            return _response(start_response,'200 OK',store.easyparcel_readiness(token,connector[1]))
         if availability:
             job_id=availability[1]
             if method=='GET':

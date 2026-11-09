@@ -356,3 +356,7 @@ The optional OIDC-backed pilot section sends the signed operator ID token from s
 ### Authenticated pilot planning (optional branch)
 
 The private OIDC-backed pilot can create a reviewable mixed-method proposal from its own stored jobs and user-supplied quotation drafts, reject stale approval, and export an approved **NOT A BOOKING** manifest. It never promotes public-reference or synthetic quotes into a real plan. See [docs/pilot_planning_integration.md](docs/pilot_planning_integration.md) for the operator walkthrough, private API and deployment limits.
+
+### EasyParcel quotation connector preparation
+
+The authenticated pilot now shows owner-scoped EasyParcel quotation readiness, missing evidence by order and explicit exclusions. Its optional fixture preview is **TEST_ONLY / SYNTHETIC** and cannot enter real planning. Open API OAuth and live quotation calls remain disabled, especially while the previously exposed Client Secret awaits rotation. See [docs/easyparcel_quote_connector.md](docs/easyparcel_quote_connector.md) for the boundary, safe demo and prerequisites.
