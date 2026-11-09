@@ -134,6 +134,49 @@ def approve_scenario(proposal, orders, quotes, unavailable=()):
     return current
 
 
+def assistant_brief(result=None, *, loaded=False, validated=False, previewed=False,
+                    approved=False, prepared=False, last_change=None, previous=None):
+    """Explain the current fictional workflow from checked state, never from a claim flag."""
+    if not loaded:
+        return {'stage': 'Start', 'next': 'Load the five fictional deliveries.',
+                'message': 'I can check five example deliveries and compare the available test options.'}
+    if not validated:
+        return {'stage': 'Blocked', 'next': 'Correct the order details and validate again.',
+                'message': 'I cannot recommend a plan until the delivery details pass validation.'}
+    if result is None:
+        return {'stage': 'Orders checked', 'next': 'Review the delivery options.',
+                'message': 'The delivery details are complete. I still need to check the available options.'}
+    if result['status'] == 'NOT READY':
+        detail = result['reason']
+        return {'stage': 'Blocked', 'next': 'Adjust a deadline or restore a provider, then review again.',
+                'message': 'I cannot find an eligible option for every delivery. ' + detail}
+    decisions = result['decisions']
+    groups = '; '.join(f"{item['service']} for {', '.join(item['shipment_ids'])} (RM {item['total_myr']:.2f})"
+                       for item in decisions)
+    proven = result['status'] == 'READY'
+    message = ('I checked your five deliveries. ' if len({oid for item in decisions for oid in item['shipment_ids']}) == 5 else
+               'I checked the deliveries. ')
+    message += ('Here is the cheapest eligible option under these test assumptions: ' if proven else
+                'Here is a feasible option; the solver did not prove it is cheapest: ') + groups + '.'
+    if result['baseline_myr'] is not None:
+        message += f" The eligible all-parcel baseline is RM {result['baseline_myr']:.2f}; the difference is RM {result['difference_myr']:.2f}."
+    else:
+        message += ' There is no complete eligible all-parcel baseline to compare.'
+    if last_change:
+        if previous and previous.get('total_myr') is not None:
+            delta = result['total_myr'] - previous['total_myr']
+            message += f" The earlier feasible plan was RM {previous['total_myr']:.2f}; this one is RM {result['total_myr']:.2f} ({delta:+.2f} MYR)."
+        message += ' The earlier approval was cleared; this plan needs a fresh review.'
+    if prepared:
+        return {'stage': 'Preparation started', 'next': 'Use the approved manifest for fictional preparation only.', 'message': message}
+    if approved:
+        return {'stage': 'Approved', 'next': 'Download the preparation manifest, then mark fictional packages prepared.', 'message': message}
+    if previewed:
+        return {'stage': 'Awaiting approval', 'next': 'Review the proposal, then approve or discard it.', 'message': message}
+    return {'stage': 'Replan required' if last_change else 'Plan ready',
+            'next': 'Preview the recommendation for a separate human approval.', 'message': message}
+
+
 def _reset_plan(state, event):
     state.festival_previous_plan = state.get('festival_current_plan')
     state.festival_last_change = event
@@ -147,6 +190,7 @@ def render():
     st.subheader('Festival challenge · five-order fictional walkthrough')
     st.error(LABEL)
     st.caption('A five-minute intake → decision → approval → preparation demonstration. Session-only; no pilot job or carrier API call.')
+    st.markdown('#### KargoKawan operations assistant')
     state = st.session_state
     if st.button('Load five-order fictional scenario'):
         state.festival_orders, state.festival_quotes = load_scenario()
@@ -160,14 +204,16 @@ def render():
         state.festival_last_change = None
         st.rerun()
     if state.get('festival_orders') is None:
-        st.info('Next action: load the fictional five-order scenario to inspect and validate delivery needs.')
+        brief = assistant_brief()
+        st.info(f"{brief['stage']} · {brief['message']} Next action: {brief['next']}")
         return
     orders, quotes = state.festival_orders, state.festival_quotes
     try:
         validate_orders(orders)
         st.success('Intake validated: five fictional orders have unique IDs, exact postcodes, positive parcel measurements and deadlines.')
     except ValueError as exc:
-        st.warning('NOT READY · Correct fictional intake: ' + str(exc))
+        brief = assistant_brief(loaded=True)
+        st.warning(f"{brief['stage']} · {brief['message']} {exc} Next action: {brief['next']}")
         return
     st.dataframe(orders, hide_index=True)
     st.caption('Three explicit Klang Valley road stops can share the fictional van. Penang and Johor orders use separate fictional parcels.')
@@ -200,11 +246,13 @@ def render():
     unavailable = state.festival_unavailable
     result = optimize(orders, quotes, unavailable, demo=True)
     state.festival_current_plan = result
-    st.write('Operational stage: ' + ('NOT READY — obtain a feasible fictional alternative' if result['status'] == 'NOT READY'
-                                    else 'PREPARED FOR MANUAL FOLLOW-UP' if state.get('festival_prepared')
-                                    else 'APPROVED FOR FICTIONAL PREPARATION' if state.get('festival_approved')
-                                    else 'AWAITING HUMAN APPROVAL' if state.get('festival_preview')
-                                    else 'ALTERNATIVES EVALUATED — preview the recommendation'))
+    brief = assistant_brief(result, loaded=True, validated=True,
+                            previewed=bool(state.get('festival_preview')),
+                            approved=bool(state.get('festival_approved')),
+                            prepared=bool(state.get('festival_prepared')),
+                            last_change=state.get('festival_last_change'),
+                            previous=state.get('festival_previous_plan'))
+    st.info(f"{brief['stage']} · {brief['message']}\n\nNext action: {brief['next']}")
     st.write('Deterministic solver:', result['status'], '·', result['reason'])
     baseline = result['baseline_myr']
     left, right = st.columns(2)
@@ -228,7 +276,12 @@ def render():
     st.write('Alternatives and constraints')
     st.dataframe(alternatives(orders, quotes, unavailable), hide_index=True)
     if result['status'] == 'NOT READY':
-        st.warning('No complete eligible fictional plan. Adjust deadlines or restore provider availability; no manifest can be prepared.')
+        uncovered = sorted(set(orders.order_id.astype(str)) - {
+            oid for quote, checked in zip(quotes, result['reviewed']) if checked['status'] == 'ELIGIBLE'
+            for oid in quote['shipment_ids']})
+        st.warning('No complete eligible fictional plan. ' +
+                   (f"No eligible quote covers {', '.join(uncovered)}. " if uncovered else '') +
+                   'Adjust deadlines or restore provider availability; no manifest can be prepared.')
         with st.expander('Fictional decision history'):
             for event in state.festival_events:
                 st.write(event)

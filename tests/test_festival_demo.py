@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from festival_demo import (LABEL, VAN, approve_scenario, alternatives,
+from festival_demo import (LABEL, VAN, approve_scenario, alternatives, assistant_brief,
                            load_scenario, manifest, validate_orders)
 from hybrid_quotes import review
 from mixed_method import optimize, preview
@@ -114,3 +114,71 @@ def test_festival_ui_impossible_deadline_blocks_approval():
     assert app.session_state['festival_approved'] is None
     assert not any(b.label == 'Preview five-order fictional plan' for b in app.button)
     assert any('No complete eligible fictional plan' in w.value for w in app.warning)
+
+
+def test_assistant_uses_solver_decisions_and_actual_comparison():
+    orders, quotes = load_scenario()
+    result = optimize(orders, quotes, demo=True)
+    brief = assistant_brief(result, loaded=True, validated=True)
+    assert brief['stage'] == 'Plan ready'
+    for decision in result['decisions']:
+        assert decision['service'] in brief['message']
+        assert ', '.join(decision['shipment_ids']) in brief['message']
+        assert f"RM {decision['total_myr']:.2f}" in brief['message']
+    assert f"RM {result['baseline_myr']:.2f}" in brief['message']
+    assert f"RM {result['difference_myr']:.2f}" in brief['message']
+    assert 'guaranteed' not in brief['message'].lower()
+    assert 'booked' not in brief['message'].lower()
+    assert 'paid' not in brief['message'].lower()
+
+
+def test_assistant_transitions_and_disruption_reset():
+    orders, quotes = load_scenario()
+    result = optimize(orders, quotes, demo=True)
+    assert assistant_brief()['stage'] == 'Start'
+    assert assistant_brief(loaded=True)['stage'] == 'Blocked'
+    assert assistant_brief(None, loaded=True, validated=True)['stage'] == 'Orders checked'
+    assert assistant_brief(result, loaded=True, validated=True, previewed=True)['stage'] == 'Awaiting approval'
+    assert assistant_brief(result, loaded=True, validated=True, approved=True)['stage'] == 'Approved'
+    assert assistant_brief(result, loaded=True, validated=True, approved=True, prepared=True)['stage'] == 'Preparation started'
+    changed = optimize(orders, quotes, [VAN], demo=True)
+    brief = assistant_brief(changed, loaded=True, validated=True, last_change='Van unavailable', previous=result)
+    assert brief['stage'] == 'Replan required'
+    assert f"{changed['total_myr'] - result['total_myr']:+.2f} MYR" in brief['message']
+    assert 'earlier approval was cleared' in brief['message']
+    assert 'approve' in brief['next'].lower() or 'approval' in brief['next'].lower()
+
+
+def test_assistant_blocked_and_missing_baseline_make_no_savings_claim():
+    orders, quotes = load_scenario()
+    changed = orders.copy()
+    changed.loc[changed.order_id == 'FEST004', 'deadline_days'] = 1
+    result = optimize(changed, quotes, demo=True)
+    brief = assistant_brief(result, loaded=True, validated=True)
+    assert brief['stage'] == 'Blocked'
+    assert 'RM ' not in brief['message']
+    van_only = [q for q in quotes if q['transport_method'] == 'multi_stop_vehicle']
+    incomplete = optimize(orders, van_only, demo=True)
+    assert assistant_brief(incomplete, loaded=True, validated=True)['stage'] == 'Blocked'
+    limited = dict(optimize(orders, quotes, demo=True), status='SOLVER LIMITED')
+    assert 'did not prove' in assistant_brief(limited, loaded=True, validated=True)['message']
+
+
+def test_assistant_ui_history_tracks_only_actual_actions():
+    app = AppTest.from_file('../app.py', default_timeout=30).run()
+    next(b for b in app.button if b.label == 'Load five-order fictional scenario').click().run()
+    assert app.session_state['festival_events'] == ['FICTIONAL INTAKE LOADED · no booking']
+    assert any('Next action: Preview the recommendation' in item.value for item in app.info)
+    next(b for b in app.button if b.label == 'Preview five-order fictional plan').click().run()
+    assert app.session_state['festival_events'][-1].startswith('FICTIONAL PLAN PROPOSED')
+    next(b for b in app.button if b.label == 'Discard five-order fictional proposal').click().run()
+    assert app.session_state['festival_approved'] is None
+    assert app.session_state['festival_events'][-1].startswith('FICTIONAL PROPOSAL DISCARDED')
+    next(b for b in app.button if b.label == 'Preview five-order fictional plan').click().run()
+    next(b for b in app.button if b.label == 'Approve five-order fictional plan').click().run()
+    assert app.session_state['festival_events'][-1].startswith('HUMAN APPROVED')
+    assert any(b.label == 'Download fictional preparation manifest — NOT A BOOKING' for b in app.get('download_button'))
+    next(b for b in app.button if b.label == 'Simulate fictional van disruption').click().run()
+    assert app.session_state['festival_events'][-1].startswith('FICTIONAL PROVIDER DISRUPTION')
+    assert app.session_state['festival_approved'] is None
+    assert not any(b.label == 'Download fictional preparation manifest — NOT A BOOKING' for b in app.get('download_button'))
