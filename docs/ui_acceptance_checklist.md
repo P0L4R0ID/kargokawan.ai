@@ -1,14 +1,17 @@
-# UI acceptance checklist
+# Guided workspace browser acceptance
 
-- [ ] Opening the app shows **Five-order walkthrough** first, with one clear scenario-loading action and a fictional-data disclosure.
-- [ ] **Delivery orders** lists all five destinations and postcodes without a wide raw table; detailed CSV-like data is expandable.
-- [ ] **Plan & compare** explains chosen groups, eligible baseline, assumption evidence, excluded options and truthful solver status.
-- [ ] **Review & approve** has no manifest before human approval. Preview and approval remain distinct actions; discard leaves orders unchanged.
-- [ ] **Activity** records only actions actually taken. Van disruption clears prior approval and calls for a new decision.
-- [ ] An impossible deadline shows an uncovered order and blocks approval and manifest export.
-- [ ] **Private Pilot** retains OIDC checks and owner-scoped backend calls. Anonymous visitors see login/setup guidance, not real jobs.
-- [ ] **Advanced & other demos** retains the previous dashboard and four-order workflow.
-- [ ] Keyboard focus is visible on buttons. Read text and status at laptop and phone widths; ensure no main recommendation requires horizontal scrolling.
-- [ ] Exported fictional manifest says **NOT A BOOKING**. No UI claims booking, payment, dispatch or guaranteed delivery.
+At **1366px laptop width** and **375px phone width**, check:
 
-Automated Streamlit AppTest checks widgets, reruns and state transitions, but it cannot establish keyboard focus order, screen-reader quality or pixel-level mobile layout. The native Streamlit tab component and responsive columns reduce layout risk; manual browser inspection at narrow widths and assistive-technology review remain necessary before public release. The advanced toolset still has dense legacy forms, and the private pilot retains its existing technical quote-evidence editing interface.
+- [ ] Landing screen shows KargoKawan, a plain subtitle, fictional disclosure and one **Try with 5 example deliveries** action without requiring Google sign-in.
+- [ ] The Orders step shows five readable destination cards without horizontal scrolling. The detailed evidence expander and deadline controls work with keyboard and touch.
+- [ ] **Review delivery plan** advances to Plan; group cards distinguish van and courier, show coverage, assumed MYR and deadline context. No repeated city names in disruption copy.
+- [ ] **How this was calculated** contains quote IDs, source limitations, exclusions and solver status; the primary recommendation stays short.
+- [ ] **Review this plan** advances to Approve. The manifest is unavailable until **Approve this plan** succeeds. **Change plan** discards the proposal.
+- [ ] Approval advances to Prepare. The five-row CSV says NOT A BOOKING. Package preparation is not described as dispatch.
+- [ ] Backward navigation preserves session state without granting approval. The progress indicator matches the visible guarded step.
+- [ ] Van disruption clears approval and preparation, explains old and new valid assumed totals, and requires a new decision. Restore works too.
+- [ ] An impossible FEST004 deadline names that order as uncovered and offers a clear recovery action without a fictitious saving.
+- [ ] Private Pilot remains separate and owner-scoped; Advanced tools remain accessible.
+- [ ] Keyboard focus, screen-reader announcements, contrast, card height and button targets are usable at both widths.
+
+Streamlit AppTest validates widgets, transitions and state, but not pixel layout, actual tab focus order, screen-reader output or touch targets. Those browser checks remain manual before deployment.

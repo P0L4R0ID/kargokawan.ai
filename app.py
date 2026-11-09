@@ -17,9 +17,9 @@ h1, h2, h3 { color: #173047; letter-spacing: -.015em; }
 .stApp button:focus-visible { outline: 3px solid #0d766d; outline-offset: 2px; }
 @media (max-width: 640px) { [data-testid="stMetric"] { padding: .65rem; } }
 </style>""", unsafe_allow_html=True)
-st.caption('KARGOKAWAN  /  MALAYSIAN SME DELIVERY OPERATIONS')
-st.title('Your deliveries, sorted.')
-st.write('Plan deliveries, compare costs and prepare shipments—all in one place.')
+st.caption('KARGOKAWAN  /  Your delivery operations companion')
+st.title('KargoKawan')
+st.write('Plan deliveries, compare options and prepare the next steps in one place.')
 public_tab, private_tab, advanced_tab = st.tabs(['Five-order walkthrough', 'Private Pilot', 'Advanced & other demos'])
 with public_tab:
     from festival_demo import render as render_festival_demo

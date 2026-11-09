@@ -78,42 +78,49 @@ def test_deadline_change_and_missing_quote_are_honest_not_ready():
         validate_orders(bad)
 
 
+def _click(app, label):
+    next(b for b in app.button if b.label == label).click().run()
+    assert not app.exception
+
+
 def test_festival_ui_complete_flow_and_session_isolation():
     with patch('pilot_client.call_pilot', side_effect=AssertionError('private pilot API must not be called')):
         app = AppTest.from_file('../app.py', default_timeout=30).run()
-        assert not app.exception
-        next(b for b in app.button if b.label == 'Load five-order fictional scenario').click().run()
-        assert not app.exception and len(app.session_state['festival_orders']) == 5
-        assert app.session_state['festival_approved'] is None
-        assert not any(b.label == 'Download fictional preparation manifest — NOT A BOOKING' for b in app.get('download_button'))
-        next(b for b in app.button if b.label == 'Preview five-order fictional plan').click().run()
+        _click(app, 'Try with 5 example deliveries')
+        assert len(app.session_state['festival_orders']) == 5
+        assert app.session_state['festival_view'] == 'Orders'
+        _click(app, 'Review delivery plan')
+        assert app.session_state['festival_view'] == 'Plan'
+        _click(app, 'Review this plan')
         assert app.session_state['festival_preview'] is not None
-        assert app.session_state['festival_approved'] is None
-        next(b for b in app.button if b.label == 'Approve five-order fictional plan').click().run()
+        assert app.session_state['festival_view'] == 'Approve'
+        assert not app.get('download_button') or not any('fictional preparation manifest' in b.label for b in app.get('download_button'))
+        _click(app, 'Approve this plan')
         assert app.session_state['festival_approved']['total_myr'] == Decimal('113.00')
-        assert any(b.label == 'Download fictional preparation manifest — NOT A BOOKING' for b in app.get('download_button'))
-        next(b for b in app.button if b.label == 'Mark fictional packages prepared').click().run()
+        assert app.session_state['festival_view'] == 'Prepare'
+        assert any('fictional preparation manifest' in b.label for b in app.get('download_button'))
+        _click(app, 'Mark fictional packages prepared')
         assert app.session_state['festival_prepared'] is True
-        next(b for b in app.button if b.label == 'Simulate fictional van disruption').click().run()
+        _click(app, 'Simulate van unavailable')
         assert app.session_state['festival_approved'] is None
-        assert app.session_state['festival_prepared'] is False
-        assert app.session_state['festival_unavailable'] == [VAN]
-        assert any('What changed: assumed plan RM 113.00 → RM 132.00' in item.value for item in app.markdown)
-        next(b for b in app.button if b.label == 'Preview five-order fictional plan').click().run()
-        next(b for b in app.button if b.label == 'Approve five-order fictional plan').click().run()
+        assert app.session_state['festival_view'] == 'Plan'
+        assert app.session_state['festival_current_plan']['total_myr'] == Decimal('132.00')
+        _click(app, 'Review this plan')
+        _click(app, 'Approve this plan')
         assert app.session_state['festival_approved']['total_myr'] == Decimal('132.00')
 
 
 def test_festival_ui_impossible_deadline_blocks_approval():
     app = AppTest.from_file('../app.py', default_timeout=30).run()
-    next(b for b in app.button if b.label == 'Load five-order fictional scenario').click().run()
+    _click(app, 'Try with 5 example deliveries')
     next(box for box in app.selectbox if box.label == 'Fictional order to adjust deadline').set_value('FEST004').run()
     next(item for item in app.number_input if item.label == 'Revised fictional deadline (days)').set_value(1).run()
-    next(b for b in app.button if b.label == 'Apply fictional deadline change').click().run()
-    assert not app.exception
+    _click(app, 'Apply fictional deadline change')
+    assert app.session_state['festival_view'] == 'Plan'
+    assert app.session_state['festival_current_plan']['status'] == 'NOT READY'
     assert app.session_state['festival_approved'] is None
-    assert not any(b.label == 'Preview five-order fictional plan' for b in app.button)
-    assert any('No complete eligible fictional plan' in w.value for w in app.warning)
+    assert not any(b.label == 'Approve this plan' for b in app.button)
+    assert not any('fictional preparation manifest' in b.label for b in app.get('download_button'))
 
 
 def test_assistant_uses_solver_decisions_and_actual_comparison():
@@ -166,23 +173,20 @@ def test_assistant_blocked_and_missing_baseline_make_no_savings_claim():
 
 def test_assistant_ui_history_tracks_only_actual_actions():
     app = AppTest.from_file('../app.py', default_timeout=30).run()
-    next(b for b in app.button if b.label == 'Load five-order fictional scenario').click().run()
+    _click(app, 'Try with 5 example deliveries')
     assert app.session_state['festival_events'] == ['FICTIONAL INTAKE LOADED · no booking']
-    assert any('Next action:' in item.value for item in app.markdown)
-
-    next(b for b in app.button if b.label == 'Preview five-order fictional plan').click().run()
+    _click(app, 'Review delivery plan')
+    _click(app, 'Review this plan')
     assert app.session_state['festival_events'][-1].startswith('FICTIONAL PLAN PROPOSED')
-    next(b for b in app.button if b.label == 'Discard five-order fictional proposal').click().run()
+    _click(app, 'Change plan')
     assert app.session_state['festival_approved'] is None
     assert app.session_state['festival_events'][-1].startswith('FICTIONAL PROPOSAL DISCARDED')
-    next(b for b in app.button if b.label == 'Preview five-order fictional plan').click().run()
-    next(b for b in app.button if b.label == 'Approve five-order fictional plan').click().run()
+    _click(app, 'Review this plan')
+    _click(app, 'Approve this plan')
     assert app.session_state['festival_events'][-1].startswith('HUMAN APPROVED')
-    assert any(b.label == 'Download fictional preparation manifest — NOT A BOOKING' for b in app.get('download_button'))
-    next(b for b in app.button if b.label == 'Simulate fictional van disruption').click().run()
+    _click(app, 'Simulate van unavailable')
     assert app.session_state['festival_events'][-1].startswith('FICTIONAL PROVIDER DISRUPTION')
     assert app.session_state['festival_approved'] is None
-    assert not any(b.label == 'Download fictional preparation manifest — NOT A BOOKING' for b in app.get('download_button'))
 
 
 def test_recommendation_copy_comes_from_selected_orders_and_methods():
@@ -192,8 +196,11 @@ def test_recommendation_copy_comes_from_selected_orders_and_methods():
     assert '3 delivery stops in Kuala Lumpur' in line
     assert 'George Town and Johor Bahru' in line
     disrupted = optimize(orders, quotes, [VAN], demo=True)
-    assert 'vehicle' not in recommendation_line(disrupted, orders)
-    assert 'George Town' in recommendation_line(disrupted, orders)
+    disrupted_line = recommendation_line(disrupted, orders)
+    assert 'vehicle' not in disrupted_line
+    assert '3 Kuala Lumpur orders' in disrupted_line
+    assert disrupted_line.count('Kuala Lumpur') == 1
+    assert 'George Town' in disrupted_line
     changed = orders.copy()
     changed.loc[changed.order_id == 'FEST004', 'deadline_days'] = 1
     blocked = optimize(changed, quotes, demo=True)

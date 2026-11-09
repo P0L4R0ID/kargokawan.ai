@@ -229,19 +229,69 @@ def recommendation_line(result, orders):
         else:
             parcels.append(places)
     if parcels:
-        parts.append('separate parcels for ' + ' and '.join(parcels) if len(parcels) > 1 else 'one parcel to ' + parcels[0])
+        grouped = list(dict.fromkeys(parcels))
+        descriptions = [f"{parcels.count(city)} {city} orders" if parcels.count(city) > 1 else city
+                        for city in grouped]
+        connector = ' plus ' if any(parcels.count(city) > 1 for city in grouped) else ' and '
+        parts.append('separate parcels for ' + connector.join(descriptions) if len(parcels) > 1
+                     else 'one parcel to ' + parcels[0])
     return 'Use ' + ' and '.join(parts) + '.'
+
+
+def _view(state):
+    """Navigation can inspect earlier steps, but never confer approval."""
+    requested = state.get('festival_view', 'Orders')
+    if state.get('festival_approved'):
+        return requested if requested in ('Orders', 'Plan', 'Prepare') else 'Prepare'
+    if state.get('festival_preview'):
+        return requested if requested in ('Orders', 'Plan', 'Approve') else 'Approve'
+    return requested if requested in ('Orders', 'Plan') else 'Plan'
+
+
+def _go(state, stage):
+    state.festival_view = stage
+    st.rerun()
+
+
+def _groups(result, orders):
+    by_id = {str(row['order_id']): row for row in orders.to_dict('records')}
+    for choice in result.get('decisions', []):
+        ids = choice['shipment_ids']
+        cities = list(dict.fromkeys(by_id[oid]['destination'] for oid in ids))
+        method = 'Van' if choice['method'] == 'multi_stop_vehicle' else 'Courier'
+        with st.container(border=True):
+            st.write(f"**{method} · {', '.join(cities)}**")
+            st.write(f"{len(ids)} {'stops' if method == 'Van' else 'parcel'} · RM {choice['total_myr']:.2f} assumed")
+            st.caption('Orders: ' + ', '.join(ids) + ' · ' + choice['service'])
+            st.caption('Quoted transit: ' + str(next((q['transit_days'] for q in st.session_state.festival_quotes
+                                                     if q['quote_id'] == choice['quote_id']), 'unknown')) +
+                       ' day(s); each order deadline was checked.')
+
+
+def _change_note(state, result):
+    if not state.get('festival_last_change'):
+        return
+    previous = state.get('festival_previous_plan')
+    st.warning('Something changed: ' + state.festival_last_change)
+    if previous and previous.get('total_myr') is not None and result['total_myr'] is not None:
+        old_ids = {item['quote_id'] for item in previous['selected']}
+        new_ids = {item['quote_id'] for item in result['selected']}
+        delta = result['total_myr'] - previous['total_myr']
+        st.write(f"What changed: assumed plan RM {previous['total_myr']:.2f} → RM {result['total_myr']:.2f} "
+                 f"({delta:+.2f} MYR). Removed: {', '.join(sorted(old_ids-new_ids)) or 'none'}. "
+                 f"Added: {', '.join(sorted(new_ids-old_ids)) or 'none'}.")
+    elif previous and result['status'] == 'NOT READY':
+        st.write('The earlier plan no longer works. There is no replacement cost to compare.')
 
 
 def render():
     state = st.session_state
-    st.subheader('Five-order walkthrough')
-    st.caption('Fictional orders and prices for demonstration. No real bookings.')
+    st.subheader("Let's get these deliveries sorted.")
+    st.write('Check your orders, compare a delivery plan, approve it and prepare a manifest.')
+    st.caption('Demo uses fictional orders and prices. No real bookings.')
     if state.get('festival_orders') is None:
-        brief = assistant_brief()
-        st.write('Five example deliveries are ready to check. Start with one click.')
-        st.caption('Next action: ' + brief['next'])
-        if st.button('Load five-order fictional scenario', type='primary'):
+        st.write('Try a complete five-delivery example. No login or courier account needed.')
+        if st.button('Try with 5 example deliveries', type='primary'):
             state.festival_orders, state.festival_quotes = load_scenario()
             state.festival_unavailable = []
             state.festival_preview = None
@@ -251,174 +301,142 @@ def render():
             state.festival_previous_plan = None
             state.festival_current_plan = None
             state.festival_last_change = None
+            state.festival_view = 'Orders'
             st.rerun()
         return
-
     orders, quotes = state.festival_orders, state.festival_quotes
     try:
         validate_orders(orders)
     except ValueError as exc:
-        brief = assistant_brief(loaded=True)
-        st.warning(f"{brief['stage']} · {brief['message']} {exc} Next action: {brief['next']}")
+        st.error('Please correct the delivery details before planning: ' + str(exc))
         return
-    unavailable = state.festival_unavailable
-    result = optimize(orders, quotes, unavailable, demo=True)
+    result = optimize(orders, quotes, state.festival_unavailable, demo=True)
     state.festival_current_plan = result
-    brief = assistant_brief(result, loaded=True, validated=True,
-                            previewed=bool(state.get('festival_preview')),
-                            approved=bool(state.get('festival_approved')),
-                            prepared=bool(state.get('festival_prepared')),
-                            last_change=state.get('festival_last_change'),
-                            previous=state.get('festival_previous_plan'))
-    overview, order_tab, plan_tab, review_tab, activity_tab = st.tabs(
-        ['Overview', 'Delivery orders', 'Plan & compare', 'Review & approve', 'Activity'])
-
-    with overview:
-        st.write(f"**{brief['stage']}**")
-        covered = len({oid for choice in result.get('selected', []) for oid in choice['shipment_ids']})
-        baseline = result['baseline_myr']
-        first, second, third, fourth = st.columns(4)
-        first.metric('Recommended assumed cost', f"RM {result['total_myr']:.2f}" if result['total_myr'] is not None else 'NOT READY')
-        second.metric('Eligible parcel baseline', f'RM {baseline:.2f}' if baseline is not None else 'Not available')
-        third.metric('Assumed difference', f"RM {result['difference_myr']:.2f}" if result['difference_myr'] is not None else 'Not available')
-        fourth.metric('Deliveries covered', f'{covered} of {len(orders)}')
-        st.write(recommendation_line(result, orders))
-        if result['status'] == 'SOLVER LIMITED':
-            st.caption('This plan is feasible; the solver did not prove it is the cheapest.')
-        elif result['status'] == 'NOT READY':
-            st.warning('A delivery has no eligible option. Check Plan & compare for the blocker.')
-        elif result['status'] == 'READY':
-            st.caption('Lowest eligible cost under these fictional assumptions. Review route and deadline details in Plan & compare.')
-        st.write('**Next action:** ' + brief['next'])
-        if result['status'] != 'NOT READY':
-            if state.get('festival_preview'):
-                st.caption('Open Review & approve to make the human decision.')
-            elif state.get('festival_approved'):
-                if not state.get('festival_prepared') and st.button('Mark fictional packages prepared', type='primary'):
-                    state.festival_prepared = True
-                    state.festival_events.append('FICTIONAL PACKAGES MARKED PREPARED · no dispatch')
-                    st.rerun()
-            elif st.button('Preview five-order fictional plan', type='primary'):
-                state.festival_preview = preview(orders, quotes, unavailable, demo=True)
-                state.festival_approved = None
-                state.festival_prepared = False
-                state.festival_events.append('FICTIONAL PLAN PROPOSED · no booking or payment')
-                st.rerun()
-        progress = {'Blocked': 0, 'Orders checked': 10, 'Plan ready': 30,
-                    'Replan required': 30, 'Awaiting approval': 55,
-                    'Approved': 80, 'Preparation started': 100}
-        st.progress(progress.get(brief['stage'], 0), text='Workflow status: ' + brief['stage'])
-        if state.get('festival_last_change'):
-            st.warning(state.festival_last_change)
-            previous = state.get('festival_previous_plan')
-            if previous and previous.get('total_myr') is not None and result['total_myr'] is not None:
-                old_ids = {item['quote_id'] for item in previous['selected']}
-                new_ids = {item['quote_id'] for item in result['selected']}
-                delta = result['total_myr'] - previous['total_myr']
-                st.write(f"What changed: assumed plan RM {previous['total_myr']:.2f} → RM {result['total_myr']:.2f} "
-                         f"({delta:+.2f} MYR). Removed: {', '.join(sorted(old_ids-new_ids)) or 'none'}. "
-                         f"Added: {', '.join(sorted(new_ids-old_ids)) or 'none'}.")
-            elif previous and result['status'] == 'NOT READY':
-                st.write('What changed: the previous fictional plan is no longer feasible; no replacement manifest is available.')
-
-    with order_tab:
-        st.subheader('Delivery orders')
-        st.success('Orders checked: unique IDs, exact five-digit postcodes, positive parcel measurements and deadlines.')
+    stage = _view(state)
+    state.festival_view = stage
+    stages = ('Orders', 'Plan', 'Approve', 'Prepare')
+    st.progress((stages.index(stage) + 1) * 25, text=f'Step {stages.index(stage)+1} of 4 · {stage}')
+    with st.expander('Earlier steps', expanded=False):
+        for back in stages[:stages.index(stage)]:
+            if st.button('View ' + back.lower(), key='festival_back_'+back):
+                _go(state, back)
+    if stage == 'Orders':
+        st.write(f"**Your deliveries · {len(orders)} orders from {orders.iloc[0]['origin']} {orders.iloc[0]['origin_postcode']}**")
         for row in orders.to_dict('records'):
             with st.container(border=True):
-                st.write(f"**{row['order_id']} · {row['destination']} {row['destination_postcode']}**")
-                st.caption(f"From {row['origin']} {row['origin_postcode']} · {row['weight_kg']} kg · "
-                           f"{row['length_cm']} × {row['width_cm']} × {row['height_cm']} cm · "
-                           f"Deadline {row['deadline_days']} day(s) · {row['recipient']}")
-        st.write('**Adjust a fictional deadline**')
-        ids = orders.order_id.astype(str).tolist()
-        selected_id = st.selectbox('Fictional order to adjust deadline', ids, key='festival_deadline_order')
-        current_days = int(orders.set_index('order_id').loc[selected_id, 'deadline_days'])
-        new_days = st.number_input('Revised fictional deadline (days)', min_value=1, max_value=14,
-                                   value=current_days, step=1, key='festival_deadline_value_' + selected_id)
-        if st.button('Apply fictional deadline change'):
-            changed = orders.copy()
-            changed.loc[changed.order_id == selected_id, 'deadline_days'] = int(new_days)
-            try:
-                state.festival_orders = validate_orders(changed)
-                _reset_plan(state, f'FICTIONAL DEADLINE CHANGED · {selected_id}: {current_days} → {int(new_days)} days')
-                st.rerun()
-            except ValueError as exc:
-                st.error('Deadline change rejected: ' + str(exc))
-        with st.expander('Detailed order data'):
+                st.write(f"**{row['destination']} · {row['destination_postcode']}**")
+                st.caption(f"{row['order_id']} · Due in {row['deadline_days']} day(s) · {row['weight_kg']} kg · "
+                           f"{row['length_cm']} × {row['width_cm']} × {row['height_cm']} cm")
+        with st.expander('Check complete order details and change a deadline'):
             st.dataframe(orders, hide_index=True)
-
-    with plan_tab:
-        st.subheader('Plan & compare')
-        st.write('Solver:', result['status'], '·', result['reason'])
+            selected_id = st.selectbox('Fictional order to adjust deadline', orders.order_id.astype(str).tolist(),
+                                       key='festival_deadline_order')
+            current_days = int(orders.set_index('order_id').loc[selected_id, 'deadline_days'])
+            new_days = st.number_input('Revised fictional deadline (days)', min_value=1, max_value=14,
+                                       value=current_days, step=1, key='festival_deadline_value_' + selected_id)
+            if st.button('Apply fictional deadline change'):
+                changed = orders.copy()
+                changed.loc[changed.order_id == selected_id, 'deadline_days'] = int(new_days)
+                try:
+                    state.festival_orders = validate_orders(changed)
+                    _reset_plan(state, f'FICTIONAL DEADLINE CHANGED · {selected_id}: {current_days} → {int(new_days)} days')
+                    state.festival_view = 'Plan'
+                    st.rerun()
+                except ValueError as exc:
+                    st.error('Please correct this deadline: ' + str(exc))
+        if st.button('Review delivery plan', type='primary'):
+            _go(state, 'Plan')
+    elif stage == 'Plan':
+        st.write('**KargoKawan’s suggested plan**')
         if result['status'] == 'NOT READY':
             uncovered = sorted(set(orders.order_id.astype(str)) - {
                 oid for quote, checked in zip(quotes, result['reviewed']) if checked['status'] == 'ELIGIBLE'
                 for oid in quote['shipment_ids']})
-            st.warning('No complete eligible fictional plan. ' +
-                       (f"No eligible quote covers {', '.join(uncovered)}. " if uncovered else '') +
-                       'Adjust deadlines or restore provider availability; no manifest can be prepared.')
+            reasons = list(dict.fromkeys(checked['reason'] for quote, checked in zip(quotes, result['reviewed'])
+                                         if checked['status'] == 'EXCLUDED' and
+                                         any(oid in quote['shipment_ids'] for oid in uncovered)))
+            st.warning('No complete plan meets the current delivery needs. ' +
+                       (f"No available option covers {', '.join(uncovered)}. " if uncovered else '') +
+                       (f"Why: {reasons[0]} " if reasons else '') +
+                       'Adjust the deadline or restore the van, then review again.')
+            _change_note(state, result)
+            if st.button('Review deliveries', type='primary'):
+                _go(state, 'Orders')
         else:
-            st.write('**Recommended shipment groups**')
-            _selected_groups(result)
-            if result['baseline_myr'] is not None:
-                left, right = st.columns(2)
-                left.metric('All-parcel eligible baseline', f"RM {result['baseline_myr']:.2f}")
-                right.metric('Mixed-method recommendation', f"RM {result['total_myr']:.2f}")
-            else:
-                st.caption('No complete eligible all-parcel baseline is available.')
-        excluded = [item for item in result['reviewed'] if item['status'] == 'EXCLUDED']
-        if excluded:
-            st.write('**Options not used**')
-            for item in excluded:
-                st.write(f"{item['quote_id']}: {item['reason']}")
-        with st.expander('Assumption evidence and all alternatives'):
-            st.dataframe(alternatives(orders, quotes, unavailable), hide_index=True)
+            st.write(recommendation_line(result, orders))
+            _groups(result, orders)
+            col1, col2 = st.columns(2)
+            col1.metric('Suggested total · assumed', f"RM {result['total_myr']:.2f}")
+            col2.metric('All-courier comparison', f"RM {result['baseline_myr']:.2f}" if result['baseline_myr'] is not None else 'Not available')
+            if result['difference_myr'] is not None:
+                st.caption(f"Assumed difference: RM {result['difference_myr']:.2f}, from the same eligible fictional options.")
+            st.write('The plan covers each order once and meets the quoted deadlines. ' +
+                     ('This is the lowest eligible assumed cost.' if result['status'] == 'READY' else
+                      'This plan is feasible; lowest cost was not proven.'))
+            _change_note(state, result)
+            if state.get('festival_preview'):
+                if st.button('Continue to approval', type='primary'):
+                    _go(state, 'Approve')
+            elif state.get('festival_approved'):
+                if st.button('Continue to preparation', type='primary'):
+                    _go(state, 'Prepare')
+            elif st.button('Review this plan', type='primary'):
+                state.festival_preview = preview(orders, quotes, state.festival_unavailable, demo=True)
+                state.festival_events.append('FICTIONAL PLAN PROPOSED · no booking or payment')
+                _go(state, 'Approve')
+        with st.expander('How this was calculated'):
+            st.write('Solver:', result['status'], '·', result['reason'])
+            st.dataframe(alternatives(orders, quotes, state.festival_unavailable), hide_index=True)
             if result.get('decisions'):
                 st.dataframe(pd.DataFrame(result['decisions']), hide_index=True)
-
-    with review_tab:
-        st.subheader('Review & approve')
-        if result['status'] == 'NOT READY':
-            st.warning('No proposal can be approved while a delivery has no eligible option.')
-        elif state.get('festival_preview'):
-            st.info('Proposal only. Approval authorizes fictional preparation, not booking, payment or dispatch.')
-            _selected_groups(state.festival_preview['result'])
-            st.write(f"**Proposed assumed total: RM {state.festival_preview['result']['total_myr']:.2f}**")
-            if st.button('Approve five-order fictional plan', type='primary'):
-                try:
-                    state.festival_approved = approve_scenario(state.festival_preview, orders, quotes, unavailable)
-                    state.festival_preview = None
-                    state.festival_prepared = False
-                    state.festival_events.append('HUMAN APPROVED FICTIONAL PLAN · no booking or payment')
-                    st.rerun()
-                except ValueError as exc:
-                    state.festival_preview = None
-                    st.error('Proposal is stale or infeasible: ' + str(exc))
-            if st.button('Discard five-order fictional proposal'):
+    elif stage == 'Approve':
+        if not state.get('festival_preview') or result['status'] == 'NOT READY':
+            _go(state, 'Plan')
+        st.write('**Review and approve**')
+        _groups(state.festival_preview['result'], orders)
+        st.write(f"**Assumed total: RM {state.festival_preview['result']['total_myr']:.2f}**")
+        st.caption('Approval allows fictional preparation only. It does not book, pay for or dispatch a shipment.')
+        if st.button('Approve this plan', type='primary'):
+            try:
+                state.festival_approved = approve_scenario(state.festival_preview, orders, quotes, state.festival_unavailable)
                 state.festival_preview = None
-                state.festival_events.append('FICTIONAL PROPOSAL DISCARDED · no change to orders')
-                st.rerun()
-        elif state.get('festival_approved'):
-            st.success('Fictional plan approved by a human. No carrier has been contacted, booked, paid or dispatched.')
-            table = manifest(orders, state.festival_approved)
-            st.download_button('Download fictional preparation manifest — NOT A BOOKING',
-                               table.to_csv(index=False), 'fictional_five_order_manifest.csv', 'text/csv')
-            st.caption('Verify real addresses, rates and service availability before any real shipment outside this demo.')
-        else:
-            st.info('Review the recommendation on Plan & compare, then preview it using the action on Overview. Approval is a separate step.')
-
-    with activity_tab:
-        st.subheader('Activity & disruptions')
-        st.write('**Fictional decision history**')
-        _timeline(state.festival_events)
-        if VAN not in unavailable:
-            if st.button('Simulate fictional van disruption'):
+                state.festival_prepared = False
+                state.festival_events.append('HUMAN APPROVED FICTIONAL PLAN · no booking or payment')
+                _go(state, 'Prepare')
+            except ValueError as exc:
+                state.festival_preview = None
+                state.festival_view = 'Plan'
+                st.error('This plan changed. Review it again: ' + str(exc))
+        if st.button('Change plan'):
+            state.festival_preview = None
+            state.festival_events.append('FICTIONAL PROPOSAL DISCARDED · no change to orders')
+            _go(state, 'Plan')
+    elif stage == 'Prepare':
+        if not state.get('festival_approved'):
+            _go(state, 'Plan')
+        st.write('**Prepare deliveries**')
+        _groups(state.festival_approved, orders)
+        st.success('Human approval recorded for fictional preparation. Nothing has been booked or dispatched.')
+        table = manifest(orders, state.festival_approved)
+        st.download_button('Download fictional preparation manifest — NOT A BOOKING',
+                           table.to_csv(index=False), 'fictional_five_order_manifest.csv', 'text/csv')
+        if not state.get('festival_prepared') and st.button('Mark fictional packages prepared', type='primary'):
+            state.festival_prepared = True
+            state.festival_events.append('FICTIONAL PACKAGES MARKED PREPARED · no dispatch')
+            st.rerun()
+        if state.get('festival_prepared'):
+            st.info('Preparation marked in this session. No carrier has been contacted.')
+        st.caption('For real shipments: verify carrier rates and addresses, pack and label parcels, then arrange bookings outside this demo.')
+    if stage != 'Orders':
+        st.caption('Demo uses fictional orders and prices. No real bookings.')
+    with st.expander('Something changed? · Demo controls and activity'):
+        if VAN not in state.festival_unavailable:
+            if st.button('Simulate van unavailable'):
                 state.festival_unavailable = [VAN]
                 _reset_plan(state, 'FICTIONAL PROVIDER DISRUPTION · van unavailable; prior approval cleared')
-                st.rerun()
-        elif st.button('Restore fictional van'):
+                _go(state, 'Plan')
+        elif st.button('Restore van'):
             state.festival_unavailable = []
             _reset_plan(state, 'FICTIONAL PROVIDER RESTORED · prior approval cleared')
-            st.rerun()
-        st.caption('Availability changes invalidate prior approval and require a new proposal. No carrier is contacted.')
+            _go(state, 'Plan')
+        _timeline(state.festival_events)
