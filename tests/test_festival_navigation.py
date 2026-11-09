@@ -75,3 +75,17 @@ def test_each_stage_has_its_own_information_hierarchy():
     assert app.session_state['festival_prepared'] is False
     click(app, 'Mark fictional packages prepared')
     assert app.session_state['festival_prepared'] is True
+
+
+def test_one_visible_demo_primary_action_per_stage():
+    app = AppTest.from_file('../app.py', default_timeout=30).run()
+    assert next(button for button in app.button if button.label == 'Find the best delivery plan').proto.type == 'primary'
+    click(app, 'Find the best delivery plan')
+    assert next(button for button in app.button if button.label == 'Review this delivery plan').proto.type == 'primary'
+    click(app, 'Review this delivery plan')
+    assert next(button for button in app.button if button.label == 'Approve this plan').proto.type == 'primary'
+    assert next(button for button in app.button if button.label == 'Change plan').proto.type != 'primary'
+    click(app, 'Approve this plan')
+    assert next(button for button in app.get('download_button') if button.label.startswith('Download preparation manifest')).proto.type == 'primary'
+    assert any(item.label == 'Preparation details' for item in app.expander)
+    assert any(item.label == 'Activity history' for item in app.expander)

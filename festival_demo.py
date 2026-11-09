@@ -283,27 +283,34 @@ def _groups(result, orders):
             st.write(f"**{method} · {', '.join(cities)}**")
             st.write(f"RM {choice['total_myr']:.2f} assumed · {len(ids)} {'stops' if method == 'Van' else 'parcel'}")
             st.caption('Orders: ' + ', '.join(ids) + ' · ' + choice['service'])
-            st.caption('Quoted transit: ' + str(next((q['transit_days'] for q in st.session_state.festival_quotes
+            st.caption('Estimated delivery time after pickup: ' + str(next((q['transit_days'] for q in st.session_state.festival_quotes
                                                      if q['quote_id'] == choice['quote_id']), 'unknown')) +
-                       ' day(s); each order deadline was checked.')
+                       ' day(s), based on fictional assumptions; not guaranteed.')
 
 
 def _change_note(state, result):
     if not state.get('festival_last_change'):
         return
     previous = state.get('festival_previous_plan')
-    st.warning('Something changed: ' + state.festival_last_change)
+    if 'PROVIDER DISRUPTION' in state.festival_last_change:
+        st.warning("The van is unavailable. I've updated your delivery plan. Please review it again.")
+    elif 'PROVIDER RESTORED' in state.festival_last_change:
+        st.warning('The van is available again. Please review the updated plan.')
+    else:
+        st.warning('Something changed. Please review the delivery plan again.')
     if previous and previous.get('total_myr') is not None and result['total_myr'] is not None:
         old_ids = {item['quote_id'] for item in previous['selected']}
         new_ids = {item['quote_id'] for item in result['selected']}
         delta = result['total_myr'] - previous['total_myr']
-        st.write(f"What changed: assumed plan RM {previous['total_myr']:.2f} → RM {result['total_myr']:.2f} "
-                 f"({delta:+.2f} MYR). Removed: {', '.join(sorted(old_ids-new_ids)) or 'none'}. "
-                 f"Added: {', '.join(sorted(new_ids-old_ids)) or 'none'}.")
+        st.write(f"Assumed cost: RM {previous['total_myr']:.2f} → RM {result['total_myr']:.2f} ({delta:+.2f} MYR).")
         changed = changed_orders(previous, result)
         if changed:
-            st.write('Methods changed: ' + '; '.join(f'{oid}: {old.replace("_", " ")} → {new.replace("_", " ")}'
-                                                   for oid, old, new in changed) + '.')
+            names = {'multi_stop_vehicle': 'multi-stop van', 'parcel_courier': 'courier parcel'}
+            st.caption('Changed deliveries: ' + '; '.join(f'{oid}: {names.get(old, old)} → {names.get(new, new)}'
+                                                         for oid, old, new in changed) + '.')
+        with st.expander('See changed option references'):
+            st.write('Removed: ' + (', '.join(sorted(old_ids-new_ids)) or 'none'))
+            st.write('Added: ' + (', '.join(sorted(new_ids-old_ids)) or 'none'))
     elif previous and result['status'] == 'NOT READY':
         st.write('The earlier plan no longer works. There is no replacement cost to compare.')
 
@@ -352,7 +359,6 @@ def render():
                 with column.container(border=True):
                     st.write(f"**{row['destination']} · {row['destination_postcode']}**")
                     st.write(f"{row['order_id']} · Due in {row['deadline_days']} day(s)")
-                    st.caption(f"{row['weight_kg']} kg · {row['length_cm']} × {row['width_cm']} × {row['height_cm']} cm")
         with st.expander('Check complete order details and change a deadline'):
             st.dataframe(orders, hide_index=True)
             selected_id = st.selectbox('Fictional order to adjust deadline', orders.order_id.astype(str).tolist(),
@@ -389,9 +395,10 @@ def render():
             if st.button('Review deliveries', type='primary'):
                 _go(state, 'Orders')
         else:
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             col1.metric('Suggested total · assumed', f"RM {result['total_myr']:.2f}")
             col2.metric('All-courier comparison', f"RM {result['baseline_myr']:.2f}" if result['baseline_myr'] is not None else 'Not available')
+            col3.metric('Deliveries covered', f"{len({oid for item in result['decisions'] for oid in item['shipment_ids']})} of {len(orders)}")
             if result['difference_myr'] is not None:
                 st.caption(f"Assumed difference: RM {result['difference_myr']:.2f}, from the same eligible fictional options.")
             st.write(recommendation_line(result, orders))
@@ -410,7 +417,7 @@ def render():
                 state.festival_preview = preview(orders, quotes, state.festival_unavailable, demo=True)
                 state.festival_events.append('FICTIONAL PLAN PROPOSED · no booking or payment')
                 _go(state, 'Approve')
-        with st.expander('How this was calculated'):
+        with st.expander('How was this calculated?'):
             st.write('Solver:', result['status'], '·', result['reason'])
             st.dataframe(alternatives(orders, quotes, state.festival_unavailable), hide_index=True)
             if result.get('decisions'):
@@ -447,22 +454,20 @@ def render():
     elif stage == 'Prepare':
         if not state.get('festival_approved'):
             _go(state, 'Plan')
-        st.write('**Prepare deliveries**')
+        st.write('**Your plan is approved**')
         approved = state.festival_approved
         st.success(f"Plan approved for {len(orders)} fictional orders in {len(approved['decisions'])} groups. Nothing has been booked or dispatched.")
         st.metric('Approved assumed total', f"RM {approved['total_myr']:.2f}")
         table = manifest(orders, state.festival_approved)
         st.download_button('Download preparation manifest — NOT A BOOKING',
                            table.to_csv(index=False), 'fictional_five_order_manifest.csv', 'text/csv', type='primary')
-        st.write('**What needs doing**')
+        st.write('Next, use the manifest to prepare the parcels. Confirm real carrier prices and service before arranging any booking.')
         tasks = preparation_tasks(orders, approved)
         marks = state.setdefault('festival_task_marks', {})
         outstanding = [task for task in tasks if not marks.get(task['id'])]
-        st.caption(f'{len(outstanding)} actions remain. Carrier checks and bookings are outside this demo.')
-        for task in outstanding[:3]:
-            st.write(f"**{task['priority']} · {task['title']}**")
-            st.caption(task['why'])
-        with st.expander('All preparation actions and operator acknowledgements'):
+        if outstanding:
+            st.caption(f'{len(outstanding)} preparation prompts remain; carrier checks and bookings are outside this demo.')
+        with st.expander('Preparation details'):
             for task in tasks:
                 done = bool(marks.get(task['id']))
                 st.write(f"{'Operator marked done' if done else task['priority']} · {task['title']}")
@@ -471,13 +476,12 @@ def render():
                     marks[task['id']] = True
                     state.festival_events.append('FICTIONAL TASK OPERATOR MARKED DONE · ' + task['id'] + ' · no carrier confirmation')
                     st.rerun()
-        if not state.get('festival_prepared') and st.button('Mark fictional packages prepared'):
-            state.festival_prepared = True
-            state.festival_events.append('FICTIONAL PACKAGES MARKED PREPARED · no dispatch')
-            st.rerun()
+            if not state.get('festival_prepared') and st.button('Mark fictional packages prepared'):
+                state.festival_prepared = True
+                state.festival_events.append('FICTIONAL PACKAGES MARKED PREPARED · no dispatch')
+                st.rerun()
         if state.get('festival_prepared'):
             st.info('Preparation marked in this session. No carrier has been contacted.')
-        st.caption('For real shipments: verify carrier rates and addresses, pack and label parcels, then arrange bookings outside this demo.')
     if stage != 'Orders':
         st.caption('Demo uses fictional orders and prices. No real bookings.')
     with st.expander('Something changed? · Demo controls and activity'):
@@ -493,4 +497,5 @@ def render():
             state.festival_unavailable = []
             _reset_plan(state, 'FICTIONAL PROVIDER RESTORED · prior approval cleared')
             _go(state, 'Plan')
+    with st.expander('Activity history'):
         _timeline(state.festival_events)
