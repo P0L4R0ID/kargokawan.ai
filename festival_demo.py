@@ -9,6 +9,8 @@ import streamlit as st
 from hybrid_quotes import normalize
 from mixed_method import optimize, preview, approve
 from sample_intake import validate_complete
+from festival_tasks import readiness, preparation_tasks, changed_orders
+from focused_quotes import fingerprint
 
 LABEL = 'FICTIONAL DEMONSTRATION — NOT REAL CARRIER PRICES, QUOTES OR BOOKINGS'
 VAN = 'Fictional Metro Multi-stop Van'
@@ -183,6 +185,8 @@ def _reset_plan(state, event):
     state.festival_preview = None
     state.festival_approved = None
     state.festival_prepared = False
+    state.festival_task_marks = {}
+    state.festival_task_fingerprint = None
     state.festival_events.append(event)
 
 
@@ -264,6 +268,8 @@ def _seed(state):
     state.festival_current_plan = None
     state.festival_last_change = None
     state.festival_view = 'Orders'
+    state.festival_task_marks = {}
+    state.festival_task_fingerprint = None
 
 
 def _groups(result, orders):
@@ -294,6 +300,10 @@ def _change_note(state, result):
         st.write(f"What changed: assumed plan RM {previous['total_myr']:.2f} → RM {result['total_myr']:.2f} "
                  f"({delta:+.2f} MYR). Removed: {', '.join(sorted(old_ids-new_ids)) or 'none'}. "
                  f"Added: {', '.join(sorted(new_ids-old_ids)) or 'none'}.")
+        changed = changed_orders(previous, result)
+        if changed:
+            st.write('Methods changed: ' + '; '.join(f'{oid}: {old.replace("_", " ")} → {new.replace("_", " ")}'
+                                                   for oid, old, new in changed) + '.')
     elif previous and result['status'] == 'NOT READY':
         st.write('The earlier plan no longer works. There is no replacement cost to compare.')
 
@@ -310,12 +320,22 @@ def render():
     except ValueError as exc:
         st.error('Please correct the delivery details before planning: ' + str(exc))
         return
+    current_fingerprint = fingerprint(orders, quotes, []) + repr(sorted(state.festival_unavailable)) + repr(True)
+    expected = state.get('festival_task_fingerprint') if state.get('festival_approved') else (
+        state.festival_preview['fingerprint'] if state.get('festival_preview') else None)
+    if expected and expected != current_fingerprint:
+        _reset_plan(state, 'FICTIONAL INPUTS CHANGED · prior approval and tasks cleared')
+        state.festival_view = 'Plan'
+        st.rerun()
     stage = _view(state)
     state.festival_view = stage
     result = None
     if stage != 'Orders':
         result = optimize(orders, quotes, state.festival_unavailable, demo=True)
         state.festival_current_plan = result
+    st.caption(readiness(orders, result or state.get('festival_current_plan'), previewed=bool(state.get('festival_preview')),
+                         approved=bool(state.get('festival_approved')),
+                         prepared=bool(state.get('festival_prepared'))))
     stages = ('Orders', 'Plan', 'Approve', 'Prepare')
     st.progress((stages.index(stage) + 1) * 25, text=f'Step {stages.index(stage)+1} of 4 · {stage}')
     with st.expander('Earlier steps', expanded=False):
@@ -410,6 +430,8 @@ def render():
         if st.button('Approve this plan', type='primary'):
             try:
                 state.festival_approved = approve_scenario(state.festival_preview, orders, quotes, state.festival_unavailable)
+                state.festival_task_fingerprint = state.festival_preview['fingerprint']
+                state.festival_task_marks = {}
                 state.festival_preview = None
                 state.festival_prepared = False
                 state.festival_events.append('HUMAN APPROVED FICTIONAL PLAN · no booking or payment')
@@ -432,9 +454,23 @@ def render():
         table = manifest(orders, state.festival_approved)
         st.download_button('Download preparation manifest — NOT A BOOKING',
                            table.to_csv(index=False), 'fictional_five_order_manifest.csv', 'text/csv', type='primary')
-        st.write('**Next steps for the operator**')
-        st.write('1. Download the manifest.\n2. Verify addresses, parcel details and actual carrier rates.\n'
-                 '3. Pack and label parcels.\n4. Arrange real carrier bookings separately.')
+        st.write('**What needs doing**')
+        tasks = preparation_tasks(orders, approved)
+        marks = state.setdefault('festival_task_marks', {})
+        outstanding = [task for task in tasks if not marks.get(task['id'])]
+        st.caption(f'{len(outstanding)} actions remain. Carrier checks and bookings are outside this demo.')
+        for task in outstanding[:3]:
+            st.write(f"**{task['priority']} · {task['title']}**")
+            st.caption(task['why'])
+        with st.expander('All preparation actions and operator acknowledgements'):
+            for task in tasks:
+                done = bool(marks.get(task['id']))
+                st.write(f"{'Operator marked done' if done else task['priority']} · {task['title']}")
+                st.caption(task['why'])
+                if task['acknowledge'] and not done and st.button('Operator marked done: ' + task['title'], key='festival_task_'+task['id']):
+                    marks[task['id']] = True
+                    state.festival_events.append('FICTIONAL TASK OPERATOR MARKED DONE · ' + task['id'] + ' · no carrier confirmation')
+                    st.rerun()
         if not state.get('festival_prepared') and st.button('Mark fictional packages prepared'):
             state.festival_prepared = True
             state.festival_events.append('FICTIONAL PACKAGES MARKED PREPARED · no dispatch')
