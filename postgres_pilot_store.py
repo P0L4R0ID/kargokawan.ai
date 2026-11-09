@@ -1,10 +1,14 @@
 """PostgreSQL implementation of the private pilot draft store.
 
-Only server-verified OIDC subjects are accepted. No provider tokens or bookings
-are stored here. Production TLS policy is enforced by pilot_api.configured_store.
+Only server-verified OIDC subjects are accepted. Provider tokens, when enabled,
+are encrypted and owner-scoped. Production TLS policy is enforced by
+pilot_api.configured_store.
 """
 import hashlib
+import hmac
 import json
+import secrets
+import time
 import uuid
 
 from psycopg_pool import ConnectionPool
@@ -64,6 +68,19 @@ class PostgresPilotStore:
                         db.execute('''CREATE TRIGGER pilot_audit_no_change BEFORE UPDATE OR DELETE ON pilot_audit
                             FOR EACH ROW EXECUTE FUNCTION pilot_audit_no_change()''')
                         db.execute('UPDATE pilot_schema_versions SET version=2 WHERE version=1')
+                    db.execute('''CREATE TABLE IF NOT EXISTS pilot_easyparcel_link_tickets (
+                        ticket_hash TEXT PRIMARY KEY, owner_sub TEXT NOT NULL,
+                        auth_host TEXT NOT NULL, expires_at BIGINT NOT NULL)''')
+                    db.execute('''CREATE TABLE IF NOT EXISTS pilot_easyparcel_pending (
+                        state_hash TEXT PRIMARY KEY, cookie_hash TEXT NOT NULL,
+                        owner_sub TEXT NOT NULL, expires_at BIGINT NOT NULL)''')
+                    db.execute('''CREATE TABLE IF NOT EXISTS pilot_easyparcel_tokens (
+                        owner_sub TEXT PRIMARY KEY, ciphertext BYTEA NOT NULL,
+                        access_expires_at BIGINT NOT NULL, refresh_expires_at BIGINT,
+                        environment TEXT NOT NULL DEFAULT 'UNKNOWN',
+                        updated_at BIGINT NOT NULL)''')
+                    db.execute('''CREATE TABLE IF NOT EXISTS pilot_easyparcel_rate_checks (
+                        owner_sub TEXT PRIMARY KEY, last_checked_at BIGINT NOT NULL)''')
         except Exception:
             self.pool.close()
             raise
@@ -71,6 +88,114 @@ class PostgresPilotStore:
     def health(self):
         with self.pool.connection() as db:
             db.execute('SELECT 1').fetchone()
+
+    @staticmethod
+    def _hash_secret(value):
+        return hashlib.sha256(value.encode()).hexdigest()
+
+    def easyparcel_link_ticket(self, identity_token, auth_host, now=None):
+        owner = self.verifier.verify(identity_token)
+        if auth_host not in ('api', 'developer'):
+            raise ValueError('Unsupported EasyParcel authorization host.')
+        now = int(time.time() if now is None else now)
+        ticket = secrets.token_urlsafe(32)
+        with self.pool.connection() as db:
+            with db.transaction():
+                db.execute('DELETE FROM pilot_easyparcel_link_tickets WHERE expires_at < %s', (now,))
+                db.execute('INSERT INTO pilot_easyparcel_link_tickets VALUES (%s,%s,%s,%s)',
+                           (self._hash_secret(ticket), owner, auth_host, now + 300))
+        return ticket
+
+    def easyparcel_begin_link(self, ticket, state, cookie, now=None):
+        now = int(time.time() if now is None else now)
+        with self.pool.connection() as db:
+            with db.transaction():
+                row = db.execute('''DELETE FROM pilot_easyparcel_link_tickets
+                    WHERE ticket_hash=%s AND expires_at>=%s RETURNING owner_sub,auth_host''',
+                    (self._hash_secret(ticket), now)).fetchone()
+                if row is None:
+                    raise PermissionError('Link request unavailable or expired.')
+                db.execute('INSERT INTO pilot_easyparcel_pending VALUES (%s,%s,%s,%s)',
+                           (self._hash_secret(state), self._hash_secret(cookie), row[0], now + 600))
+        return row[1]
+
+    def easyparcel_consume_state(self, state, cookie, now=None):
+        now = int(time.time() if now is None else now)
+        with self.pool.connection() as db:
+            with db.transaction():
+                row = db.execute('''SELECT cookie_hash,owner_sub,expires_at
+                    FROM pilot_easyparcel_pending WHERE state_hash=%s FOR UPDATE''',
+                    (self._hash_secret(state),)).fetchone()
+                if row is None or row[2] < now or not hmac.compare_digest(row[0], self._hash_secret(cookie)):
+                    raise PermissionError('Authorization state was not verified.')
+                db.execute('DELETE FROM pilot_easyparcel_pending WHERE state_hash=%s',
+                           (self._hash_secret(state),))
+        return row[1]
+
+    def easyparcel_save_tokens(self, owner, ciphertext, access_expires_at,
+                               refresh_expires_at=None, now=None, preserve_environment=False,
+                               expected_ciphertext=None):
+        if not isinstance(ciphertext, bytes) or not ciphertext:
+            raise ValueError('Encrypted provider tokens required.')
+        now = int(time.time() if now is None else now)
+        with self.pool.connection() as db:
+            if expected_ciphertext is not None:
+                updated=db.execute('''UPDATE pilot_easyparcel_tokens SET ciphertext=%s,
+                    access_expires_at=%s,refresh_expires_at=%s,updated_at=%s
+                    WHERE owner_sub=%s AND ciphertext=%s''',
+                    (ciphertext,access_expires_at,refresh_expires_at,now,owner,
+                     expected_ciphertext))
+                if updated.rowcount != 1:
+                    raise ValueError('EasyParcel connection changed; reload before retrying.')
+                return
+            db.execute('''INSERT INTO pilot_easyparcel_tokens
+                (owner_sub,ciphertext,access_expires_at,refresh_expires_at,environment,updated_at)
+                VALUES (%s,%s,%s,%s,'UNKNOWN',%s)
+                ON CONFLICT (owner_sub) DO UPDATE SET ciphertext=EXCLUDED.ciphertext,
+                access_expires_at=EXCLUDED.access_expires_at,
+                refresh_expires_at=EXCLUDED.refresh_expires_at,
+                environment=CASE WHEN %s THEN pilot_easyparcel_tokens.environment ELSE 'UNKNOWN' END,
+                updated_at=EXCLUDED.updated_at''',
+                (owner, ciphertext, access_expires_at, refresh_expires_at, now, preserve_environment))
+
+    def easyparcel_connection(self, identity_token):
+        owner = self.verifier.verify(identity_token)
+        with self.pool.connection() as db:
+            row = db.execute('''SELECT environment,updated_at FROM pilot_easyparcel_tokens
+                WHERE owner_sub=%s''', (owner,)).fetchone()
+        return {'status':'CONNECTED' if row else 'NOT_CONNECTED',
+                'environment':row[0] if row else 'UNKNOWN',
+                'linked_at':row[1] if row else None}
+
+    def easyparcel_token_record(self, identity_token):
+        owner = self.verifier.verify(identity_token)
+        with self.pool.connection() as db:
+            row = db.execute('''SELECT ciphertext,access_expires_at,refresh_expires_at,environment
+                FROM pilot_easyparcel_tokens WHERE owner_sub=%s''', (owner,)).fetchone()
+        return {'ciphertext':bytes(row[0]),'access_expires_at':row[1],
+                'refresh_expires_at':row[2],'environment':row[3]} if row else None
+
+    def easyparcel_update_environment(self, identity_token, environment):
+        owner = self.verifier.verify(identity_token)
+        if environment not in ('Sandbox','Live'):
+            raise ValueError('Provider-attested environment required.')
+        with self.pool.connection() as db:
+            db.execute('UPDATE pilot_easyparcel_tokens SET environment=%s WHERE owner_sub=%s',
+                       (environment, owner))
+
+    def easyparcel_reserve_rate_check(self, identity_token, now=None):
+        owner = self.verifier.verify(identity_token)
+        now = int(time.time() if now is None else now)
+        with self.pool.connection() as db:
+            with db.transaction():
+                db.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', (owner,))
+                row = db.execute('SELECT last_checked_at FROM pilot_easyparcel_rate_checks WHERE owner_sub=%s',
+                                 (owner,)).fetchone()
+                if row and now - row[0] < 30:
+                    raise ValueError('Wait 30 seconds before another EasyParcel rate check.')
+                db.execute('''INSERT INTO pilot_easyparcel_rate_checks VALUES (%s,%s)
+                    ON CONFLICT (owner_sub) DO UPDATE SET last_checked_at=EXCLUDED.last_checked_at''',
+                    (owner, now))
 
     @staticmethod
     def _payload(value):

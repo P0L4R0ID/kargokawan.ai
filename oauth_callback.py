@@ -1,7 +1,7 @@
 """Separate WSGI callback for EasyParcel Open API authorization-code OAuth.
 
-Tokens are encrypted in a persistent SQLite file and never returned to browsers.
-This service is deliberately separate from Streamlit's WebSocket session state.
+The legacy isolated SQLite flow is test-only. Production requires explicit
+enablement, signed pilot identity and encrypted owner-scoped PostgreSQL tokens.
 """
 import base64
 import hashlib
@@ -92,28 +92,87 @@ def refresh_token(config, refresh, transport=None):
 
 def create_app(env=None, token_transport=None, clock=None, enable_test_flow=False, pilot_store=None,
                easyparcel_service=None):
-    """Build the service. OAuth routes are test-only until user identity exists.
-
-    Production's ``application`` never enables the flow. Injecting a mock token
-    transport is required for tests, so no test can accidentally call EasyParcel.
-    """
+    """Build disabled-by-default OAuth and authenticated pilot endpoints."""
     if enable_test_flow and (env is None or token_transport is None):
         raise ValueError('The test flow requires explicit configuration and a mock transport.')
     config = configuration(env) if enable_test_flow else None
     clock = clock or time.time
     crypt = Fernet(config['EASYPARCEL_OAUTH_FERNET_KEY'].encode()) if config else None
     path = config['EASYPARCEL_OAUTH_DB'] if config else None
+    from pilot_easyparcel import configuration as pilot_oauth_configuration
+    pilot_config = pilot_oauth_configuration(env)
+
+    def active_store():
+        if pilot_store is not None:
+            return pilot_store
+        from pilot_api import configured_store
+        return configured_store(env)
+
+    def production_oauth(environ, start_response, store):
+        from postgres_pilot_store import PostgresPilotStore
+        from pilot_easyparcel import AUTH_HOSTS, save_authorization
+        if pilot_config is None or not isinstance(store, PostgresPilotStore):
+            return _response(start_response, '403 Forbidden', 'EasyParcel account linking is not available.')
+        if environ.get('HTTP_HOST') != parse.urlsplit(pilot_config['EASYPARCEL_OAUTH_REDIRECT_URI']).netloc:
+            return _response(start_response, '400 Bad Request', 'Callback origin is invalid.')
+        if environ.get('REQUEST_METHOD') != 'GET':
+            return _response(start_response, '405 Method Not Allowed', 'Method not allowed.')
+        route = environ.get('PATH_INFO')
+        params = parse.parse_qs(environ.get('QUERY_STRING',''), keep_blank_values=True)
+        if route == '/oauth/easyparcel/start':
+            if len(params.get('ticket',[])) != 1 or not params['ticket'][0]:
+                return _response(start_response, '400 Bad Request', 'Link request is missing.')
+            session, state = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+            try:
+                host = store.easyparcel_begin_link(params['ticket'][0], state, session, int(clock()))
+            except PermissionError:
+                return _response(start_response, '400 Bad Request', 'Link request expired or was already used.')
+            url = AUTH_HOSTS[host] + '?' + parse.urlencode({
+                'client_id':pilot_config['EASYPARCEL_OAUTH_CLIENT_ID'],
+                'redirect_uri':pilot_config['EASYPARCEL_OAUTH_REDIRECT_URI'], 'state':state})
+            cookie = f'{COOKIE}={session}; Path=/oauth/easyparcel; Max-Age=600; Secure; HttpOnly; SameSite=Lax'
+            return _response(start_response, '302 Found', '', [('Location',url),('Set-Cookie',cookie)])
+        cookies = SimpleCookie()
+        try:
+            cookies.load(environ.get('HTTP_COOKIE',''))
+            session = cookies[COOKIE].value if COOKIE in cookies else ''
+        except Exception:
+            session = ''
+        if len(params.get('state',[])) != 1 or not params['state'][0] or not session:
+            return _response(start_response, '400 Bad Request', 'Authorization state was not verified.')
+        try:
+            owner = store.easyparcel_consume_state(params['state'][0], session, int(clock()))
+        except PermissionError:
+            return _response(start_response, '400 Bad Request', 'Authorization state was not verified.')
+        cleared = f'{COOKIE}=; Path=/oauth/easyparcel; Max-Age=0; Secure; HttpOnly; SameSite=Lax'
+        if 'error' in params or len(params.get('code',[])) != 1 or not params['code'][0]:
+            return _response(start_response, '400 Bad Request', 'Provider authorization was not completed.', [('Set-Cookie',cleared)])
+        try:
+            token = _exchange(pilot_config, params['code'][0], token_transport)
+            save_authorization(store, owner, pilot_config, token, int(clock()))
+        except (ValueError, error.HTTPError, error.URLError, TimeoutError, OSError):
+            return _response(start_response, '502 Bad Gateway', 'Provider token exchange failed.', [('Set-Cookie',cleared)])
+        return _response(start_response, '200 OK',
+            'EasyParcel account linked. Account environment is unverified; return to the private pilot.',
+            [('Set-Cookie',cleared)])
 
     def app(environ, start_response):
         route = environ.get('PATH_INFO', '')
         if route == '/health':
             return _response(start_response, '200 OK', 'ok')
         if route.startswith('/pilot/'):
-            from pilot_api import handle, configured_store
-            return handle(environ,start_response,pilot_store if pilot_store is not None else configured_store(env),
-                          easyparcel_service=easyparcel_service)
+            from pilot_api import handle
+            store=active_store()
+            service=easyparcel_service
+            if service is None and pilot_config is not None:
+                from postgres_pilot_store import PostgresPilotStore
+                if isinstance(store, PostgresPilotStore):
+                    from pilot_easyparcel import PilotEasyParcelService
+                    service=PilotEasyParcelService(store,pilot_config,token_transport=token_transport,clock=clock)
+            return handle(environ,start_response,store,easyparcel_service=service,
+                          oauth_config=pilot_config)
         if route in ('/oauth/easyparcel/start', '/oauth/easyparcel/callback') and not enable_test_flow:
-            return _response(start_response, '403 Forbidden', 'EasyParcel account linking is not available.')
+            return production_oauth(environ,start_response,active_store())
         if route in ('/oauth/easyparcel/start', '/oauth/easyparcel/callback'):
             expected_host = parse.urlsplit(config['EASYPARCEL_OAUTH_REDIRECT_URI']).netloc
             if environ.get('HTTP_HOST') != expected_host:
@@ -169,5 +228,5 @@ def get_stored_token(db_path, fernet_key, session):
 
 
 def application(environ, start_response):
-    """Gunicorn entry point; account linking remains disabled in production."""
+    """Gunicorn entry point; linking requires explicit secure configuration."""
     return create_app()(environ, start_response)

@@ -17,7 +17,7 @@ def _secrets():
 
 def render():
     st.header('Authenticated pilot operations')
-    st.caption('Separate from fictional demos. EasyParcel Open API OAuth: NOT_CONNECTED. No booking or payment.')
+    st.caption('Separate from fictional demos. EasyParcel OAuth and rate checks require explicit operator action. No booking or payment.')
     settings=_secrets()
     try:
         auth=settings.get('auth',{})
@@ -50,6 +50,48 @@ def render():
         return
     st.success('Pilot operator verified by Render; persistent job storage is available.')
     if st.button('Sign out of pilot'): st.logout()
+    st.subheader('EasyParcel connection')
+    connection=call_pilot(id_token,'GET','/pilot/easyparcel/connection')
+    if connection['status']=='OK':
+        details=connection['data']
+        st.info('Connection: '+details['status']+' · Account environment: '+details['environment'])
+        if details['environment']=='UNKNOWN' and details['status']=='CONNECTED':
+            st.warning('EasyParcel did not attest Sandbox or Live during OAuth. Do not claim Sandbox verification.')
+        host_choice=st.radio('Authorization host',
+            ['api.easyparcel.com (documented authorization endpoint)',
+             'developer.easyparcel.com (separate fallback attempt)'],
+            key='pilot_easyparcel_auth_host')
+        if st.button('Prepare EasyParcel Connect'):
+            st.session_state.pop('pilot_easyparcel_connect_url',None)
+            st.session_state.pop('pilot_easyparcel_sample_result',None)
+            host='api' if host_choice.startswith('api.') else 'developer'
+            prepared=call_pilot(id_token,'POST','/pilot/easyparcel/link-intent',
+                                {'authorization_host':host},request_key=secrets.token_urlsafe(24))
+            if prepared['status']=='OK':
+                st.session_state['pilot_easyparcel_connect_url']=prepared['data']['start_url']
+                st.session_state['pilot_easyparcel_connect_until']=int(time.time())+300
+            else: st.warning(prepared.get('reason','Connection setup is unavailable.'))
+        url=st.session_state.get('pilot_easyparcel_connect_url','')
+        if (int(time.time()) < st.session_state.get('pilot_easyparcel_connect_until',0)
+                and url.startswith('https://kargokawan-oauth.onrender.com/oauth/easyparcel/start?ticket=')):
+            st.link_button('Continue to EasyParcel account authorization',url)
+            st.caption('This one-time link expires after five minutes. Select your Sandbox account at EasyParcel. A fallback host requires a fresh Connect attempt.')
+        if details['status']=='CONNECTED':
+            st.caption('First test uses only the fictional 10150 → 11950, 1.5 kg sample from the API reference. No private job or customer details are sent.')
+            if st.button('Check one fictional EasyParcel sample rate'):
+                checked=call_pilot(id_token,'POST','/pilot/easyparcel/sandbox-quotation',{},
+                                   request_key=secrets.token_urlsafe(24))
+                if checked['status']=='OK': st.session_state['pilot_easyparcel_sample_result']=checked['data']
+                else: st.warning(checked.get('reason','Provider quotation unavailable.'))
+            sample=st.session_state.get('pilot_easyparcel_sample_result')
+            if sample:
+                st.caption('Provider environment evidence: '+sample.get('environment','UNKNOWN')+
+                           ' · '+sample.get('sample_input','FICTIONAL INPUT')+
+                           ' · Review only, never a booking or planner quote')
+                if sample.get('observations'): st.dataframe(sample['observations'],hide_index=True)
+                if sample.get('errors'): st.dataframe(sample['errors'],hide_index=True)
+    else:
+        st.info('EasyParcel Connect is unavailable: '+connection.get('reason','Backend configuration is incomplete.'))
     from sample_intake import validate_complete
     uploaded=st.file_uploader('Upload pilot delivery orders CSV',type='csv',key='pilot_orders_upload')
     if uploaded is not None and st.button('Create private pilot job'):
@@ -119,7 +161,7 @@ def render():
         st.info('EasyParcel Open API: '+connector['status']+' · '+connector['reason'])
         st.caption('Credentials are not used here. Saved manual quotes remain USER_IMPORTED_UNVERIFIED; no carrier request occurred.')
         with st.expander('Check EasyParcel rates (private, read-only)'):
-            st.caption('Requires an owner-linked EasyParcel Open API account. Results are review-only and are never auto-approved or booked. Enter state codes confirmed from your order information; postcodes alone do not establish a state.')
+            st.caption('Private-job rate requests remain disabled for the first Sandbox test. The Connect section above uses only fictional PDF sample data.')
             chosen_orders=st.multiselect('Orders to quote (up to five)',
                 [str(item['order_id']) for item in job['data']['orders']],
                 max_selections=5,key='pilot_easyparcel_orders_'+job_id)
@@ -130,7 +172,7 @@ def render():
                 receiver=st.text_input('Destination subdivision code for '+order_id+' (e.g. MY-07)',
                     key='pilot_easyparcel_receiver_'+job_id+'_'+order_id)
                 subdivisions[order_id]={'sender':sender,'receiver':receiver}
-            if st.button('Check EasyParcel rates',disabled=not chosen_orders,
+            if st.button('Check EasyParcel rates',disabled=True,
                          key='pilot_easyparcel_check_'+job_id):
                 result=call_pilot(id_token,'POST','/pilot/jobs/'+job_id+'/easyparcel/quotations',
                     {'order_ids':chosen_orders,'subdivisions':subdivisions},

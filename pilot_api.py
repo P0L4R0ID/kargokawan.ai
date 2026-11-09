@@ -25,6 +25,9 @@ MANIFEST_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/proposals/(' + RE
 AUDIT_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/audit$')
 EASYPARCEL_READINESS_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/easyparcel/readiness$')
 EASYPARCEL_RATES_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/easyparcel/quotations$')
+EASYPARCEL_LINK_INTENT = '/pilot/easyparcel/link-intent'
+EASYPARCEL_CONNECTION = '/pilot/easyparcel/connection'
+EASYPARCEL_SAMPLE = '/pilot/easyparcel/sandbox-quotation'
 ORDER_FIELDS = {'order_id','origin','destination','weight_kg','length_cm','width_cm','height_cm',
                 'deadline_days','recipient','origin_postcode','destination_postcode'}
 QUOTE_FIELDS = set('quote_id source_class provider service transport_method origin_postcode destination_postcode pickup_location dropoff_locations shipment_ids physical_weight_kg length_cm width_cm height_cm capacity_kg displayed_cost_myr full_cost tax_status surcharge_status source_reference collected_at valid_until transit_days restrictions'.split())
@@ -153,7 +156,7 @@ def _quote(value):
     return value
 
 
-def handle(environ,start_response,store,easyparcel_service=None):
+def handle(environ,start_response,store,easyparcel_service=None,oauth_config=None):
     route=environ.get('PATH_INFO','')
     method=environ.get('REQUEST_METHOD','GET')
     header=environ.get('HTTP_AUTHORIZATION','')
@@ -172,6 +175,27 @@ def handle(environ,start_response,store,easyparcel_service=None):
             if hasattr(store, 'health'):
                 store.health()
             return _response(start_response,'200 OK',{'status':'READY','easyparcel_oauth':'NOT_CONNECTED'})
+        if route in (EASYPARCEL_LINK_INTENT,EASYPARCEL_CONNECTION,EASYPARCEL_SAMPLE):
+            from postgres_pilot_store import PostgresPilotStore
+            if oauth_config is None or not isinstance(store,PostgresPilotStore):
+                return _response(start_response,'503 Service Unavailable',{'status':'NOT_CONNECTED',
+                    'reason':'EasyParcel OAuth requires enabled configuration and persistent pilot PostgreSQL.'})
+            if route==EASYPARCEL_CONNECTION and method=='GET':
+                return _response(start_response,'200 OK',store.easyparcel_connection(token))
+            if route==EASYPARCEL_LINK_INTENT and method=='POST':
+                _mutation_key(environ);body=_body(environ)
+                if set(body)!={'authorization_host'} or body['authorization_host'] not in ('api','developer'):
+                    raise ValueError('Choose a documented authorization host.')
+                ticket=store.easyparcel_link_ticket(token,body['authorization_host'])
+                from pilot_easyparcel import BACKEND_ORIGIN
+                return _response(start_response,'200 OK',{'start_url':BACKEND_ORIGIN+
+                    '/oauth/easyparcel/start?ticket='+ticket,'expires_in_seconds':300})
+            if route==EASYPARCEL_SAMPLE and method=='POST':
+                _mutation_key(environ);body=_body(environ)
+                if body: raise ValueError('Sandbox sample requests accept no customer data.')
+                if easyparcel_service is None:
+                    return _response(start_response,'503 Service Unavailable',{'status':'NOT_CONNECTED'})
+                return _response(start_response,'200 OK',easyparcel_service.quote_sample(token))
         if route=='/pilot/jobs':
             if method=='GET':
                 return _response(start_response,'200 OK',{'job_ids':store.list_jobs(token)})

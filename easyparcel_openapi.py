@@ -15,6 +15,12 @@ ONDEMAND_DOCUMENTED_URL = 'https://api.easyparcel.com/open_api/2026-09/ondemand/
 MAX_SHIPMENTS = 5
 
 
+class ProviderRateLimited(ValueError):
+    def __init__(self, environment=None):
+        super().__init__('EasyParcel rate limit reached; try again later.')
+        self.provider_environment_evidence = environment
+
+
 def _positive(value, name):
     try:
         number = Decimal(str(value))
@@ -129,7 +135,13 @@ def request_standard(access_token, orders, subdivisions, *, transport, timeout=1
             result = json.load(response)
     except error.HTTPError as exc:
         if exc.code == 429:
-            raise ValueError('EasyParcel rate limit reached; try again later.') from None
+            try:
+                details = json.loads(exc.read(4096))
+                limit_set = details.get('rate_limit', {}).get('limit_set')
+            except (ValueError, TypeError, AttributeError, OSError):
+                limit_set = None
+            environment = {'sandbox':'Sandbox','live':'Live'}.get(str(limit_set).lower())
+            raise ProviderRateLimited(environment) from None
         raise ValueError('EasyParcel quotation request failed (HTTP ' + str(exc.code) + ').') from None
     except (error.URLError, TimeoutError, OSError):
         raise ValueError('EasyParcel quotation request timed out or was unavailable.') from None
@@ -145,7 +157,11 @@ def request_standard(access_token, orders, subdivisions, *, transport, timeout=1
             raise ValueError('EasyParcel shipment response could not be matched to the requested order.')
     # The standard success schema does not attest the account environment.
     # A caller-selected label must never be presented as provider verification.
-    return parse_standard(result, [order['order_id'] for order in orders])
+    parsed = parse_standard(result, [order['order_id'] for order in orders])
+    limit_set = result.get('rate_limit', {}).get('limit_set') if isinstance(result.get('rate_limit'), dict) else None
+    parsed['provider_environment_evidence'] = {'sandbox':'Sandbox','live':'Live'}.get(
+        str(limit_set).lower())
+    return parsed
 
 
 def validate_ondemand_waypoints(waypoints):

@@ -367,7 +367,8 @@ The public demo now includes a one-click five-order Malaysian SME scenario. It v
 
 ### EasyParcel Open API 2026-09
 
-The Private Pilot includes a read-only, review-only quotation request boundary
-based on the uploaded 2026-09 API Reference. Production OAuth and provider calls
-remain disabled pending owner-scoped PostgreSQL linking and verified account
-environment. See [Open API integration status](docs/easyparcel_openapi_2026_09.md).
+The Private Pilot has an explicitly enabled, owner-scoped EasyParcel OAuth
+connection path and one operator-triggered, read-only fictional shipment rate
+check based on the uploaded 2026-09 API Reference. Tokens stay encrypted in
+PostgreSQL, and rates remain review-only. No real provider connection has been
+tested or deployed yet. See [Open API integration and setup](docs/easyparcel_openapi_2026_09.md).

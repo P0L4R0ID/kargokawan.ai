@@ -5,7 +5,7 @@ from urllib.error import HTTPError
 
 import pytest
 
-from easyparcel_openapi import (STANDARD_URL, ONDEMAND_DOCUMENTED_URL,
+from easyparcel_openapi import (STANDARD_URL, ONDEMAND_DOCUMENTED_URL, ProviderRateLimited,
                                 standard_payload, parse_standard, request_standard,
                                 validate_ondemand_waypoints, OwnerScopedReadOnlyQuoteService)
 
@@ -83,6 +83,12 @@ def test_rate_limit_and_unverified_environment():
         raise HTTPError(req.full_url, 429, 'Rate limit', {}, None)
     with pytest.raises(ValueError, match='rate limit'):
         request_standard('fictional-token', [ORDER], CODES, transport=throttled)
+    def sandbox_limit(req,timeout):
+        body=io.BytesIO(b'{"rate_limit":{"limit_set":"sandbox"}}')
+        raise HTTPError(req.full_url,429,'Rate limit',{},body)
+    with pytest.raises(ProviderRateLimited) as caught:
+        request_standard('fictional-token',[ORDER],CODES,transport=sandbox_limit)
+    assert caught.value.provider_environment_evidence=='Sandbox'
 
 
 def test_response_cannot_be_attributed_to_a_different_order():

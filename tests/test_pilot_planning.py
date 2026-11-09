@@ -179,6 +179,13 @@ def test_pilot_planning_ui_with_injected_authenticated_backend():
     def fake_call(token, method, path, payload=None, version=None, request_key=None):
         assert token == 'signed-test-id-token'
         if path == '/pilot/status': return {'status': 'OK', 'data': {'status': 'READY'}}
+        if path == '/pilot/easyparcel/connection':
+            return {'status':'OK','data':{'status':'CONNECTED','environment':'UNKNOWN','linked_at':1}}
+        if path == '/pilot/easyparcel/sandbox-quotation' and method == 'POST':
+            assert payload == {}
+            return {'status':'OK','data':{'environment':'UNKNOWN','sample_input':'FICTIONAL PDF EXAMPLE',
+                'observations':[{'courier_name':'FICTIONAL TEST COURIER','total_amount_myr':'12.31'}],
+                'errors':[]}}
         if path == '/pilot/jobs': return {'status': 'OK', 'data': {'job_ids': ['PILOT-TEST']}}
         if path == '/pilot/jobs/PILOT-TEST': return {'status': 'OK', 'data': {'orders': ORDERS, 'version': 1}}
         if path.endswith('/quotes'): return {'status': 'OK', 'data': {'quote_ids': []}}
@@ -197,6 +204,10 @@ def test_pilot_planning_ui_with_injected_authenticated_backend():
          patch('pilot_ui.st.user', user), patch('pilot_ui.call_pilot', side_effect=fake_call):
         app = AppTest.from_string('from pilot_ui import render\nrender()', default_timeout=20).run()
         assert not app.exception
+        assert any(button.label == 'Prepare EasyParcel Connect' for button in app.button)
+        next(button for button in app.button if button.label == 'Check one fictional EasyParcel sample rate').click().run()
+        assert not app.exception
+        assert any('FICTIONAL TEST COURIER' in str(frame.value) for frame in app.dataframe)
         assert any(button.label == 'Check EasyParcel rates' for button in app.button)
         assert any('Orders to quote' in widget.label for widget in app.multiselect)
         next(button for button in app.button if button.label == 'Request private plan').click().run()

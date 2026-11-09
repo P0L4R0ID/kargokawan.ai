@@ -24,13 +24,14 @@ def call_pilot(identity_token, method, path, payload=None, version=None, request
             if version is None: raise ValueError('A current version is required.')
             headers['If-Match']=str(version)
     req=request.Request(BASE_URL+path,body,headers,method=method)
-    sender=transport or (lambda item: request.urlopen(item,timeout=10))
+    sender=transport or (lambda item: request.urlopen(item,timeout=20 if path=='/pilot/easyparcel/sandbox-quotation' else 10))
     try:
         with sender(req) as response:
             return {'status':'OK','data':json.load(response)}
     except error.HTTPError as exc:
-        reasons={401:'Sign in again.',403:'This operator is not authorised.',404:'Record unavailable to this operator.',
-                 409:'Data changed; reload before saving.',503:'Pilot identity or persistent storage is unavailable.'}
+        reasons={400:'Request rejected. Check connection details or wait before retrying.',
+                 401:'Sign in again.',403:'This operator is not authorised.',404:'Record unavailable to this operator.',
+                 409:'Data changed; reload before saving.',503:'Pilot identity, OAuth configuration or persistent storage is unavailable.'}
         return {'status':'NOT_CONNECTED' if exc.code==503 else 'ERROR','reason':reasons.get(exc.code,'Pilot request failed.'),'http_status':exc.code}
     except (error.URLError,TimeoutError,OSError,ValueError):
         return {'status':'ERROR','reason':'Pilot backend could not be reached or returned an invalid response.'}
