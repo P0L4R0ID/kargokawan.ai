@@ -268,13 +268,14 @@ def _seed(state):
 
 def _groups(result, orders):
     by_id = {str(row['order_id']): row for row in orders.to_dict('records')}
-    for choice in result.get('decisions', []):
+    for choice in sorted(result.get('decisions', []),
+                         key=lambda item: (item['method'] != 'multi_stop_vehicle', item['shipment_ids'])):
         ids = choice['shipment_ids']
         cities = list(dict.fromkeys(by_id[oid]['destination'] for oid in ids))
         method = 'Van' if choice['method'] == 'multi_stop_vehicle' else 'Courier'
         with st.container(border=True):
             st.write(f"**{method} · {', '.join(cities)}**")
-            st.write(f"{len(ids)} {'stops' if method == 'Van' else 'parcel'} · RM {choice['total_myr']:.2f} assumed")
+            st.write(f"RM {choice['total_myr']:.2f} assumed · {len(ids)} {'stops' if method == 'Van' else 'parcel'}")
             st.caption('Orders: ' + ', '.join(ids) + ' · ' + choice['service'])
             st.caption('Quoted transit: ' + str(next((q['transit_days'] for q in st.session_state.festival_quotes
                                                      if q['quote_id'] == choice['quote_id']), 'unknown')) +
@@ -325,11 +326,13 @@ def render():
         st.write(f"**You have {len(orders)} deliveries to arrange**")
         st.caption(f"Pickup: {orders.iloc[0]['origin']} {orders.iloc[0]['origin_postcode']} · "
                    f"{orders.destination.nunique()} destination cities. Delivery groups have not been chosen yet.")
-        for row in orders.to_dict('records'):
-            with st.container(border=True):
-                st.write(f"**{row['destination']} · {row['destination_postcode']}**")
-                st.caption(f"{row['order_id']} · Due in {row['deadline_days']} day(s) · {row['weight_kg']} kg · "
-                           f"{row['length_cm']} × {row['width_cm']} × {row['height_cm']} cm")
+        order_rows = orders.to_dict('records')
+        for offset in range(0, len(order_rows), 2):
+            for column, row in zip(st.columns(2), order_rows[offset:offset + 2]):
+                with column.container(border=True):
+                    st.write(f"**{row['destination']} · {row['destination_postcode']}**")
+                    st.write(f"{row['order_id']} · Due in {row['deadline_days']} day(s)")
+                    st.caption(f"{row['weight_kg']} kg · {row['length_cm']} × {row['width_cm']} × {row['height_cm']} cm")
         with st.expander('Check complete order details and change a deadline'):
             st.dataframe(orders, hide_index=True)
             selected_id = st.selectbox('Fictional order to adjust deadline', orders.order_id.astype(str).tolist(),
@@ -350,7 +353,7 @@ def render():
         if st.button('Find the best delivery plan', type='primary'):
             _go(state, 'Plan')
     elif stage == 'Plan':
-        st.write('**KargoKawan’s suggested plan**')
+        st.write('**Delivery plan**')
         if result['status'] == 'NOT READY':
             uncovered = sorted(set(orders.order_id.astype(str)) - {
                 oid for quote, checked in zip(quotes, result['reviewed']) if checked['status'] == 'ELIGIBLE'
@@ -366,16 +369,16 @@ def render():
             if st.button('Review deliveries', type='primary'):
                 _go(state, 'Orders')
         else:
-            st.write(recommendation_line(result, orders))
-            _groups(result, orders)
             col1, col2 = st.columns(2)
             col1.metric('Suggested total · assumed', f"RM {result['total_myr']:.2f}")
             col2.metric('All-courier comparison', f"RM {result['baseline_myr']:.2f}" if result['baseline_myr'] is not None else 'Not available')
             if result['difference_myr'] is not None:
                 st.caption(f"Assumed difference: RM {result['difference_myr']:.2f}, from the same eligible fictional options.")
-            st.write('The plan covers each order once and meets the quoted deadlines. ' +
+            st.write(recommendation_line(result, orders))
+            st.caption('Every order is covered once within its stated deadline. ' +
                      ('This is the lowest eligible assumed cost.' if result['status'] == 'READY' else
                       'This plan is feasible; lowest cost was not proven.'))
+            _groups(result, orders)
             _change_note(state, result)
             if state.get('festival_preview'):
                 if st.button('Continue to approval', type='primary'):
@@ -396,9 +399,14 @@ def render():
         if not state.get('festival_preview') or result['status'] == 'NOT READY':
             _go(state, 'Plan')
         st.write('**Review and approve**')
-        _groups(state.festival_preview['result'], orders)
-        st.write(f"**Assumed total: RM {state.festival_preview['result']['total_myr']:.2f}**")
-        st.caption('Approval allows fictional preparation only. It does not book, pay for or dispatch a shipment.')
+        proposed = state.festival_preview['result']
+        st.metric('Plan to approve · assumed', f"RM {proposed['total_myr']:.2f}")
+        st.write(f"{len(orders)} orders · {len(proposed['decisions'])} delivery groups · " +
+                 ', '.join('Van' if item['method'] == 'multi_stop_vehicle' else 'Courier'
+                           for item in proposed['decisions']))
+        st.caption('Approval lets KargoKawan prepare a shipment manifest. It does not book, pay for or dispatch deliveries.')
+        with st.expander('View full plan details'):
+            _groups(proposed, orders)
         if st.button('Approve this plan', type='primary'):
             try:
                 state.festival_approved = approve_scenario(state.festival_preview, orders, quotes, state.festival_unavailable)
@@ -418,12 +426,16 @@ def render():
         if not state.get('festival_approved'):
             _go(state, 'Plan')
         st.write('**Prepare deliveries**')
-        _groups(state.festival_approved, orders)
-        st.success('Human approval recorded for fictional preparation. Nothing has been booked or dispatched.')
+        approved = state.festival_approved
+        st.success(f"Plan approved for {len(orders)} fictional orders in {len(approved['decisions'])} groups. Nothing has been booked or dispatched.")
+        st.metric('Approved assumed total', f"RM {approved['total_myr']:.2f}")
         table = manifest(orders, state.festival_approved)
-        st.download_button('Download fictional preparation manifest — NOT A BOOKING',
-                           table.to_csv(index=False), 'fictional_five_order_manifest.csv', 'text/csv')
-        if not state.get('festival_prepared') and st.button('Mark fictional packages prepared', type='primary'):
+        st.download_button('Download preparation manifest — NOT A BOOKING',
+                           table.to_csv(index=False), 'fictional_five_order_manifest.csv', 'text/csv', type='primary')
+        st.write('**Next steps for the operator**')
+        st.write('1. Download the manifest.\n2. Verify addresses, parcel details and actual carrier rates.\n'
+                 '3. Pack and label parcels.\n4. Arrange real carrier bookings separately.')
+        if not state.get('festival_prepared') and st.button('Mark fictional packages prepared'):
             state.festival_prepared = True
             state.festival_events.append('FICTIONAL PACKAGES MARKED PREPARED · no dispatch')
             st.rerun()

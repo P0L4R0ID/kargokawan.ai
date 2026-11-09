@@ -5,7 +5,7 @@ At **1366px laptop width** and **375px phone width**, check:
 - [ ] Landing screen shows KargoKawan, five fictional order cards and compact demo disclosure. No recommendation, cost, saving or van assignment appears before planning.
 - [ ] Pickup and destination counts match the validated order records. The complete evidence and deadline controls are expandable and keyboard reachable.
 - [ ] **Find the best delivery plan** is the one dominant action. It advances to Plan and triggers the optimiser; plain reruns on Orders do not.
-- [ ] Plan cards show method, covered orders, cost and deadline context without horizontal scrolling or repeated city names. Technical quote IDs, exclusions, provenance and solver status remain under **How this was calculated**.
+- [ ] Plan leads with cost, then shows any selected van before courier cards, with method, covered orders and deadline context without horizontal scrolling or repeated city names. Technical quote IDs, exclusions, provenance and solver status remain under **How this was calculated**.
 - [ ] **Review this delivery plan** opens a distinct approval step. No manifest exists until **Approve this plan** succeeds. **Change plan** discards without approval.
 - [ ] Prepare shows the five-row NOT A BOOKING manifest and fictional preparation marker. No booking, payment, dispatch or tracking claim appears.
 - [ ] **Simulate van unavailable** clears approval and preparation, explains old/new valid assumed totals and requires a fresh review. **Restore van** works too.

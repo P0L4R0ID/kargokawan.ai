@@ -93,11 +93,11 @@ def test_festival_ui_complete_flow_and_session_isolation():
         _click(app, 'Review this delivery plan')
         assert app.session_state['festival_preview'] is not None
         assert app.session_state['festival_view'] == 'Approve'
-        assert not app.get('download_button') or not any('fictional preparation manifest' in b.label for b in app.get('download_button'))
+        assert not app.get('download_button') or not any('preparation manifest' in b.label for b in app.get('download_button'))
         _click(app, 'Approve this plan')
         assert app.session_state['festival_approved']['total_myr'] == Decimal('113.00')
         assert app.session_state['festival_view'] == 'Prepare'
-        assert any('fictional preparation manifest' in b.label for b in app.get('download_button'))
+        assert any('preparation manifest' in b.label for b in app.get('download_button'))
         _click(app, 'Mark fictional packages prepared')
         assert app.session_state['festival_prepared'] is True
         _click(app, 'Simulate van unavailable')
@@ -118,7 +118,7 @@ def test_festival_ui_impossible_deadline_blocks_approval():
     assert app.session_state['festival_current_plan']['status'] == 'NOT READY'
     assert app.session_state['festival_approved'] is None
     assert not any(b.label == 'Approve this plan' for b in app.button)
-    assert not any('fictional preparation manifest' in b.label for b in app.get('download_button'))
+    assert not any('preparation manifest' in b.label for b in app.get('download_button'))
 
 
 def test_assistant_uses_solver_decisions_and_actual_comparison():

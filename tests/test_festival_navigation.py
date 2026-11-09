@@ -26,10 +26,10 @@ def test_guided_journey_and_backward_navigation():
     click(app, 'Find the best delivery plan')
     click(app, 'Review this delivery plan')
     assert app.session_state['festival_view'] == 'Approve'
-    assert not any('fictional preparation manifest' in item.label for item in app.get('download_button'))
+    assert not any('preparation manifest' in item.label for item in app.get('download_button'))
     click(app, 'Approve this plan')
     assert app.session_state['festival_view'] == 'Prepare'
-    assert any('fictional preparation manifest' in item.label for item in app.get('download_button'))
+    assert any('preparation manifest' in item.label for item in app.get('download_button'))
     click(app, 'View plan')
     assert app.session_state['festival_approved'] is not None
     click(app, 'Continue to preparation')
@@ -53,3 +53,25 @@ def test_blocked_deadline_requires_correction():
     assert not any(button.label == 'Approve this plan' for button in app.button)
     click(app, 'Review deliveries')
     assert app.session_state['festival_view'] == 'Orders'
+
+
+def test_each_stage_has_its_own_information_hierarchy():
+    app = AppTest.from_file('../app.py', default_timeout=30).run()
+    assert app.session_state['festival_current_plan'] is None
+    assert not any(item.label == 'Suggested total · assumed' for item in app.metric)
+    click(app, 'Find the best delivery plan')
+    assert app.metric[0].label == 'Suggested total · assumed'
+    choices = app.session_state['festival_current_plan']['decisions']
+    assert sum(len(item['shipment_ids']) for item in choices) == 5
+    assert choices and any(item['method'] == 'multi_stop_vehicle' for item in choices)
+    click(app, 'Review this delivery plan')
+    assert any(item.label == 'Plan to approve · assumed' for item in app.metric)
+    assert not any(item.label == 'Suggested total · assumed' for item in app.metric)
+    assert not any('preparation manifest' in item.label for item in app.get('download_button'))
+    click(app, 'Approve this plan')
+    assert any(item.label == 'Approved assumed total' for item in app.metric)
+    assert not any(item.label == 'Plan to approve · assumed' for item in app.metric)
+    assert any('preparation manifest' in item.label for item in app.get('download_button'))
+    assert app.session_state['festival_prepared'] is False
+    click(app, 'Mark fictional packages prepared')
+    assert app.session_state['festival_prepared'] is True
