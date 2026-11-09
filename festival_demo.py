@@ -12,6 +12,7 @@ from sample_intake import validate_complete
 from festival_tasks import readiness, preparation_tasks, changed_orders
 from focused_quotes import fingerprint
 from product_ui import order_card, route_card, cost_panel, decision_panel, approved_panel
+from festival_explanations import plan_reasons
 
 LABEL = 'FICTIONAL DEMONSTRATION — NOT REAL CARRIER PRICES, QUOTES OR BOOKINGS'
 VAN = 'Fictional Metro Multi-stop Van'
@@ -395,6 +396,8 @@ def render():
                      ('This is the lowest eligible assumed cost.' if result['status'] == 'READY' else
                       'This plan is feasible; lowest cost was not proven.'))
             _groups(result, orders)
+            st.write('**Why KargoKawan recommends this plan**')
+            st.markdown('\n'.join('- ' + reason for reason in plan_reasons(orders, quotes, result)))
             _change_note(state, result)
             if state.get('festival_preview'):
                 if st.button('Continue to approval', type='primary'):
