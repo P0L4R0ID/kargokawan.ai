@@ -118,6 +118,32 @@ def render():
         connector=evidence['connector']
         st.info('EasyParcel Open API: '+connector['status']+' · '+connector['reason'])
         st.caption('Credentials are not used here. Saved manual quotes remain USER_IMPORTED_UNVERIFIED; no carrier request occurred.')
+        with st.expander('Check EasyParcel rates (private, read-only)'):
+            st.caption('Requires an owner-linked EasyParcel Open API account. Results are review-only and are never auto-approved or booked. Enter state codes confirmed from your order information; postcodes alone do not establish a state.')
+            chosen_orders=st.multiselect('Orders to quote (up to five)',
+                [str(item['order_id']) for item in job['data']['orders']],
+                max_selections=5,key='pilot_easyparcel_orders_'+job_id)
+            subdivisions={}
+            for order_id in chosen_orders:
+                sender=st.text_input('Origin subdivision code for '+order_id+' (e.g. MY-14)',
+                    key='pilot_easyparcel_sender_'+job_id+'_'+order_id)
+                receiver=st.text_input('Destination subdivision code for '+order_id+' (e.g. MY-07)',
+                    key='pilot_easyparcel_receiver_'+job_id+'_'+order_id)
+                subdivisions[order_id]={'sender':sender,'receiver':receiver}
+            if st.button('Check EasyParcel rates',disabled=not chosen_orders,
+                         key='pilot_easyparcel_check_'+job_id):
+                result=call_pilot(id_token,'POST','/pilot/jobs/'+job_id+'/easyparcel/quotations',
+                    {'order_ids':chosen_orders,'subdivisions':subdivisions},
+                    request_key=secrets.token_urlsafe(24))
+                if result['status']=='OK':
+                    st.session_state['pilot_easyparcel_result_'+job_id+'_'+str(job['data']['version'])]=result['data']
+                else: st.warning(result.get('reason','EasyParcel is not connected.'))
+            observed=st.session_state.get('pilot_easyparcel_result_'+job_id+'_'+str(job['data']['version']))
+            if observed:
+                st.caption('Account environment: '+observed.get('environment','UNKNOWN')+
+                           ' · REVIEW ONLY · No booking · No planner promotion')
+                if observed.get('observations'): st.dataframe(observed['observations'],hide_index=True)
+                if observed.get('errors'): st.dataframe(observed['errors'],hide_index=True)
         if evidence['missing_quote_tasks']:
             st.write('Missing complete courier quotations')
             st.dataframe(evidence['missing_quote_tasks'],hide_index=True)

@@ -24,6 +24,7 @@ APPROVAL_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/proposals/(' + RE
 MANIFEST_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/proposals/(' + RECORD_ID + r')/manifest$')
 AUDIT_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/audit$')
 EASYPARCEL_READINESS_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/easyparcel/readiness$')
+EASYPARCEL_RATES_PATH = re.compile(r'^/pilot/jobs/(' + RECORD_ID + r')/easyparcel/quotations$')
 ORDER_FIELDS = {'order_id','origin','destination','weight_kg','length_cm','width_cm','height_cm',
                 'deadline_days','recipient','origin_postcode','destination_postcode'}
 QUOTE_FIELDS = set('quote_id source_class provider service transport_method origin_postcode destination_postcode pickup_location dropoff_locations shipment_ids physical_weight_kg length_cm width_cm height_cm capacity_kg displayed_cost_myr full_cost tax_status surcharge_status source_reference collected_at valid_until transit_days restrictions'.split())
@@ -152,7 +153,7 @@ def _quote(value):
     return value
 
 
-def handle(environ,start_response,store):
+def handle(environ,start_response,store,easyparcel_service=None):
     route=environ.get('PATH_INFO','')
     method=environ.get('REQUEST_METHOD','GET')
     header=environ.get('HTTP_AUTHORIZATION','')
@@ -188,6 +189,27 @@ def handle(environ,start_response,store):
         connector=EASYPARCEL_READINESS_PATH.fullmatch(route)
         if connector and method=='GET':
             return _response(start_response,'200 OK',store.easyparcel_readiness(token,connector[1]))
+        rates=EASYPARCEL_RATES_PATH.fullmatch(route)
+        if rates and method=='POST':
+            key=_mutation_key(environ)
+            body=_body(environ)
+            if set(body)!={'order_ids','subdivisions'}:
+                raise ValueError('Select order IDs and explicitly supplied subdivision codes only.')
+            # Ownership check happens before reporting connection status. A
+            # connector must never receive arbitrary client-supplied orders.
+            orders=store.job_snapshot(token,rates[1])['orders']
+            ids=body['order_ids']
+            if not isinstance(ids,list) or not 1<=len(ids)<=5 or any(not isinstance(x,str) for x in ids) or len(set(ids))!=len(ids):
+                raise ValueError('Select one to five distinct order IDs.')
+            selected=[row for row in orders if row['order_id'] in ids]
+            if len(selected)!=len(ids):
+                raise ValueError('Selected order is not in this job.')
+            if easyparcel_service is None:
+                return _response(start_response,'503 Service Unavailable',{'status':'NOT_CONNECTED',
+                    'reason':'Owner-scoped EasyParcel OAuth connection is disabled.'})
+            from easyparcel_openapi import standard_payload
+            standard_payload(selected,body['subdivisions'])
+            return _response(start_response,'200 OK',easyparcel_service.quote(token,rates[1],selected,body['subdivisions'],key))
         if availability:
             job_id=availability[1]
             if method=='GET':

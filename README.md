@@ -364,3 +364,10 @@ The authenticated pilot now shows owner-scoped EasyParcel quotation readiness, m
 ### Festival five-order end-to-end fictional walkthrough
 
 The public demo now includes a one-click five-order Malaysian SME scenario. It validates intake, compares explicitly fictional courier and three-stop vehicle assumptions with the deterministic mixed-method optimiser, requires a preview and human approval, exports a **NOT A BOOKING** preparation manifest, and replans after a fictional van disruption or deadline change. It stays in the Streamlit session and never enters the authenticated PostgreSQL pilot. See [docs/festival_demo_walkthrough.md](docs/festival_demo_walkthrough.md) for a five-minute script and exact limitations.
+
+### EasyParcel Open API 2026-09
+
+The Private Pilot includes a read-only, review-only quotation request boundary
+based on the uploaded 2026-09 API Reference. Production OAuth and provider calls
+remain disabled pending owner-scoped PostgreSQL linking and verified account
+environment. See [Open API integration status](docs/easyparcel_openapi_2026_09.md).

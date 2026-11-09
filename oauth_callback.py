@@ -90,7 +90,8 @@ def refresh_token(config, refresh, transport=None):
     return result
 
 
-def create_app(env=None, token_transport=None, clock=None, enable_test_flow=False, pilot_store=None):
+def create_app(env=None, token_transport=None, clock=None, enable_test_flow=False, pilot_store=None,
+               easyparcel_service=None):
     """Build the service. OAuth routes are test-only until user identity exists.
 
     Production's ``application`` never enables the flow. Injecting a mock token
@@ -109,7 +110,8 @@ def create_app(env=None, token_transport=None, clock=None, enable_test_flow=Fals
             return _response(start_response, '200 OK', 'ok')
         if route.startswith('/pilot/'):
             from pilot_api import handle, configured_store
-            return handle(environ,start_response,pilot_store if pilot_store is not None else configured_store(env))
+            return handle(environ,start_response,pilot_store if pilot_store is not None else configured_store(env),
+                          easyparcel_service=easyparcel_service)
         if route in ('/oauth/easyparcel/start', '/oauth/easyparcel/callback') and not enable_test_flow:
             return _response(start_response, '403 Forbidden', 'EasyParcel account linking is not available.')
         if route in ('/oauth/easyparcel/start', '/oauth/easyparcel/callback'):

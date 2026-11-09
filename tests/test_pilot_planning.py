@@ -197,6 +197,8 @@ def test_pilot_planning_ui_with_injected_authenticated_backend():
          patch('pilot_ui.st.user', user), patch('pilot_ui.call_pilot', side_effect=fake_call):
         app = AppTest.from_string('from pilot_ui import render\nrender()', default_timeout=20).run()
         assert not app.exception
+        assert any(button.label == 'Check EasyParcel rates' for button in app.button)
+        assert any('Orders to quote' in widget.label for widget in app.multiselect)
         next(button for button in app.button if button.label == 'Request private plan').click().run()
         assert not app.exception
         assert any('NOT READY' in warning.value for warning in app.warning)

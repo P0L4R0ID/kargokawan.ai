@@ -11,7 +11,7 @@ from pilot_store import OperatorVerifier, PilotStore
 from pilot_client import call_pilot
 
 
-def setup(tmp_path):
+def setup(tmp_path, easyparcel_service=None):
     private=rsa.generate_private_key(public_exponent=65537,key_size=2048)
     numbers=private.public_key().public_numbers()
     b64=lambda x: base64.urlsafe_b64encode(x.to_bytes((x.bit_length()+7)//8,'big')).rstrip(b'=').decode()
@@ -23,7 +23,7 @@ def setup(tmp_path):
                 'iat':int(time.time()),'exp':int(time.time())+300}
         claims.update(changes)
         return jwt.encode(claims,private,algorithm='RS256',headers={'kid':'one'})
-    return create_app(pilot_store=store),token
+    return create_app(pilot_store=store,easyparcel_service=easyparcel_service),token
 
 
 def call(app,path,method='GET',token=None,body=None,key=None,version=None):
@@ -100,6 +100,34 @@ def test_pilot_rejects_untrusted_data_and_unsafe_methods(tmp_path):
     assert call(app,'/pilot/jobs/'+job,'DELETE',owner)[0]==404
     assert call(app,'/oauth/easyparcel/start',token=owner)[0]==403
     assert call(app,'/oauth/easyparcel/callback',token=owner)[0]==403
+
+
+def test_read_only_rates_require_owner_and_connection(tmp_path):
+    app,token=setup(tmp_path);owner=token()
+    job=call(app,'/pilot/jobs','POST',owner,{'orders':[ORDER]},'orders-for-rates-12345')[1]['job_id']
+    path='/pilot/jobs/'+job+'/easyparcel/quotations'
+    payload={'order_ids':['PILOT-1'],'subdivisions':{'PILOT-1':{'sender':'MY-02','receiver':'MY-13'}}}
+    assert call(app,path,'POST',None,payload,'rate-request-123456')[0]==401
+    assert call(app,path,'POST',token('wrong'),payload,'rate-request-123456')[0]==403
+    assert call(app,path,'POST',owner,payload,'rate-request-123456')[0]==503
+    assert call(app,path,'POST',owner,{**payload,'order_ids':['OTHER']},'rate-request-123456')[0]==400
+    assert call(app,path,'POST',owner,{**payload,'order_ids':[{}]},'rate-request-123456')[0]==400
+
+
+def test_mocked_quote_service_receives_only_owned_orders(tmp_path):
+    observed=[]
+    class Service:
+        def quote(self, identity, job_id, orders, subdivisions, key):
+            observed.append((job_id,orders,subdivisions))
+            return {'environment':'UNKNOWN','observations':[],'errors':[]}
+    app,token=setup(tmp_path,Service());owner=token()
+    job=call(app,'/pilot/jobs','POST',owner,{'orders':[ORDER]},'orders-for-rates-67890')[1]['job_id']
+    path='/pilot/jobs/'+job+'/easyparcel/quotations'
+    payload={'order_ids':['PILOT-1'],'subdivisions':{'PILOT-1':{'sender':'MY-02','receiver':'MY-13'}}}
+    assert call(app,path,'POST',owner,payload,'rate-request-678901')[0]==200
+    assert observed[0][0]==job and observed[0][1]==[ORDER]
+    assert call(app,path,'POST',token('wrong'),payload,'rate-request-678902')[0]==403
+    assert len(observed)==1
 
 
 def test_frontend_bridge_is_server_side_and_sanitized():
