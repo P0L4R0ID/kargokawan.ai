@@ -213,14 +213,34 @@ def _selected_groups(result):
             st.caption('Fictional provider: ' + choice['provider'])
 
 
+def recommendation_line(result, orders):
+    """Summarise only the solver's selected, fully covered fictional route."""
+    if result['status'] not in ('READY', 'SOLVER LIMITED'):
+        return 'No complete delivery plan meets the current test constraints.'
+    by_id = {str(row['order_id']): row for row in orders.to_dict('records')}
+    parts = []
+    parcels = []
+    for choice in result['decisions']:
+        ids = choice['shipment_ids']
+        destinations = list(dict.fromkeys(by_id[oid]['destination'] for oid in ids))
+        places = ', '.join(destinations)
+        if choice['method'] == 'multi_stop_vehicle':
+            parts.append(f"one vehicle for {len(ids)} delivery stops in {places}")
+        else:
+            parcels.append(places)
+    if parcels:
+        parts.append('separate parcels for ' + ' and '.join(parcels) if len(parcels) > 1 else 'one parcel to ' + parcels[0])
+    return 'Use ' + ' and '.join(parts) + '.'
+
+
 def render():
     state = st.session_state
-    st.subheader('Five-order delivery walkthrough')
-    st.caption(LABEL + ' · Session-only; no pilot job or carrier call.')
+    st.subheader('Five-order walkthrough')
+    st.caption('Fictional orders and prices for demonstration. No real bookings.')
     if state.get('festival_orders') is None:
         brief = assistant_brief()
-        st.info(f"KargoKawan operations assistant · {brief['message']}")
-        st.write('**Next action:** ' + brief['next'])
+        st.write('Five example deliveries are ready to check. Start with one click.')
+        st.caption('Next action: ' + brief['next'])
         if st.button('Load five-order fictional scenario', type='primary'):
             state.festival_orders, state.festival_quotes = load_scenario()
             state.festival_unavailable = []
@@ -254,7 +274,22 @@ def render():
         ['Overview', 'Delivery orders', 'Plan & compare', 'Review & approve', 'Activity'])
 
     with overview:
-        st.info(f"KargoKawan operations assistant · **{brief['stage']}** · {brief['message']}\n\nNext action: {brief['next']}")
+        st.write(f"**{brief['stage']}**")
+        covered = len({oid for choice in result.get('selected', []) for oid in choice['shipment_ids']})
+        baseline = result['baseline_myr']
+        first, second, third, fourth = st.columns(4)
+        first.metric('Recommended assumed cost', f"RM {result['total_myr']:.2f}" if result['total_myr'] is not None else 'NOT READY')
+        second.metric('Eligible parcel baseline', f'RM {baseline:.2f}' if baseline is not None else 'Not available')
+        third.metric('Assumed difference', f"RM {result['difference_myr']:.2f}" if result['difference_myr'] is not None else 'Not available')
+        fourth.metric('Deliveries covered', f'{covered} of {len(orders)}')
+        st.write(recommendation_line(result, orders))
+        if result['status'] == 'SOLVER LIMITED':
+            st.caption('This plan is feasible; the solver did not prove it is the cheapest.')
+        elif result['status'] == 'NOT READY':
+            st.warning('A delivery has no eligible option. Check Plan & compare for the blocker.')
+        elif result['status'] == 'READY':
+            st.caption('Lowest eligible cost under these fictional assumptions. Review route and deadline details in Plan & compare.')
+        st.write('**Next action:** ' + brief['next'])
         if result['status'] != 'NOT READY':
             if state.get('festival_preview'):
                 st.caption('Open Review & approve to make the human decision.')
@@ -269,14 +304,10 @@ def render():
                 state.festival_prepared = False
                 state.festival_events.append('FICTIONAL PLAN PROPOSED · no booking or payment')
                 st.rerun()
-        st.caption('Workflow: orders checked → options compared → proposal → human approval → fictional preparation. No booking or dispatch.')
-        col1, col2, col3 = st.columns(3)
-        col1.metric('Deliveries covered', f"{len({oid for choice in result.get('selected', []) for oid in choice['shipment_ids']})} / {len(orders)}")
-        baseline = result['baseline_myr']
-        col2.metric('Eligible parcel baseline', f'RM {baseline:.2f}' if baseline is not None else 'Not available')
-        col3.metric('Recommended assumed cost', f"RM {result['total_myr']:.2f}" if result['total_myr'] is not None else 'NOT READY')
-        if baseline is not None and result['total_myr'] is not None:
-            st.caption(f"Assumed difference: RM {result['difference_myr']:.2f}, compared with eligible standalone parcels from this same fictional quote set.")
+        progress = {'Blocked': 0, 'Orders checked': 10, 'Plan ready': 30,
+                    'Replan required': 30, 'Awaiting approval': 55,
+                    'Approved': 80, 'Preparation started': 100}
+        st.progress(progress.get(brief['stage'], 0), text='Workflow status: ' + brief['stage'])
         if state.get('festival_last_change'):
             st.warning(state.festival_last_change)
             previous = state.get('festival_previous_plan')

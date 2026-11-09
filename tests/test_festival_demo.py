@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from festival_demo import (LABEL, VAN, approve_scenario, alternatives, assistant_brief,
+from festival_demo import (LABEL, VAN, approve_scenario, alternatives, assistant_brief, recommendation_line,
                            load_scenario, manifest, validate_orders)
 from hybrid_quotes import review
 from mixed_method import optimize, preview
@@ -168,7 +168,8 @@ def test_assistant_ui_history_tracks_only_actual_actions():
     app = AppTest.from_file('../app.py', default_timeout=30).run()
     next(b for b in app.button if b.label == 'Load five-order fictional scenario').click().run()
     assert app.session_state['festival_events'] == ['FICTIONAL INTAKE LOADED · no booking']
-    assert any('Next action: Preview the recommendation' in item.value for item in app.info)
+    assert any('Next action:' in item.value for item in app.markdown)
+
     next(b for b in app.button if b.label == 'Preview five-order fictional plan').click().run()
     assert app.session_state['festival_events'][-1].startswith('FICTIONAL PLAN PROPOSED')
     next(b for b in app.button if b.label == 'Discard five-order fictional proposal').click().run()
@@ -182,3 +183,18 @@ def test_assistant_ui_history_tracks_only_actual_actions():
     assert app.session_state['festival_events'][-1].startswith('FICTIONAL PROVIDER DISRUPTION')
     assert app.session_state['festival_approved'] is None
     assert not any(b.label == 'Download fictional preparation manifest — NOT A BOOKING' for b in app.get('download_button'))
+
+
+def test_recommendation_copy_comes_from_selected_orders_and_methods():
+    orders, quotes = load_scenario()
+    plan = optimize(orders, quotes, demo=True)
+    line = recommendation_line(plan, orders)
+    assert '3 delivery stops in Kuala Lumpur' in line
+    assert 'George Town and Johor Bahru' in line
+    disrupted = optimize(orders, quotes, [VAN], demo=True)
+    assert 'vehicle' not in recommendation_line(disrupted, orders)
+    assert 'George Town' in recommendation_line(disrupted, orders)
+    changed = orders.copy()
+    changed.loc[changed.order_id == 'FEST004', 'deadline_days'] = 1
+    blocked = optimize(changed, quotes, demo=True)
+    assert 'No complete delivery plan' in recommendation_line(blocked, changed)

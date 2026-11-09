@@ -18,8 +18,8 @@ h1, h2, h3 { color: #173047; letter-spacing: -.015em; }
 @media (max-width: 640px) { [data-testid="stMetric"] { padding: .65rem; } }
 </style>""", unsafe_allow_html=True)
 st.caption('KARGOKAWAN  /  MALAYSIAN SME DELIVERY OPERATIONS')
-st.title('Delivery decisions, with you in control')
-st.write('Check orders, compare eligible delivery options, approve a plan, and prepare the next steps.')
+st.title('Your deliveries, sorted.')
+st.write('Plan deliveries, compare costs and prepare shipments—all in one place.')
 public_tab, private_tab, advanced_tab = st.tabs(['Five-order walkthrough', 'Private Pilot', 'Advanced & other demos'])
 with public_tab:
     from festival_demo import render as render_festival_demo
