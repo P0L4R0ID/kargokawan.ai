@@ -20,6 +20,8 @@ from pilot_ui import render as render_pilot
 render_pilot()
 st.header('Public fictional demo')
 st.warning('SIMULATION ONLY · All shipping providers are fictional. Rates, costs, ETAs and savings are simulated assumptions, not quotations or guarantees. No bookings or payments.')
+from festival_demo import render as render_festival_demo
+render_festival_demo()
 for key, value in {'orders':sample_orders(), 'planner':{}, 'revision':0, 'upload_hash':None}.items():
     if key not in st.session_state: st.session_state[key] = value
 s = st.session_state

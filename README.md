@@ -360,3 +360,7 @@ The private OIDC-backed pilot can create a reviewable mixed-method proposal from
 ### EasyParcel quotation connector preparation
 
 The authenticated pilot now shows owner-scoped EasyParcel quotation readiness, missing evidence by order and explicit exclusions. Its optional fixture preview is **TEST_ONLY / SYNTHETIC** and cannot enter real planning. Open API OAuth and live quotation calls remain disabled, especially while the previously exposed Client Secret awaits rotation. See [docs/easyparcel_quote_connector.md](docs/easyparcel_quote_connector.md) for the boundary, safe demo and prerequisites.
+
+### Festival five-order end-to-end fictional walkthrough
+
+The public demo now includes a one-click five-order Malaysian SME scenario. It validates intake, compares explicitly fictional courier and three-stop vehicle assumptions with the deterministic mixed-method optimiser, requires a preview and human approval, exports a **NOT A BOOKING** preparation manifest, and replans after a fictional van disruption or deadline change. It stays in the Streamlit session and never enters the authenticated PostgreSQL pilot. See [docs/festival_demo_walkthrough.md](docs/festival_demo_walkthrough.md) for a five-minute script and exact limitations.
